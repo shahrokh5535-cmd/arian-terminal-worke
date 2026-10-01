@@ -25,3 +25,11 @@ Promoted market/signature collectors in v0.9.0 respect `ENABLE_PROMOTED_MARKET_I
 Each performs a read-only shadow probe before its first claim. Selection uses the existing DB policy.
 An outstanding legacy run causes the external scheduler to wait; legacy jobs remain active until real writes are verified.
 Runs are locked, ingestion is idempotent by run ID, and a lost delivery can be retried once safely.
+
+Discovered-token risk in v0.10.0 uses `ENABLE_DISCOVERED_RISK_INGEST` (default true with
+credentials) and `DISCOVERED_RISK_INTERVAL_MS` (minimum/default 600000). It claims at
+most two eligible Solana tokens per cycle, respecting pending legacy requests and
+24-hour risk freshness. `/probe/discovered-risk` checks a known SOL mint without
+writing. Unsupported tokens receive a six-hour 404 backoff; 429 receives ten minutes.
+SQL preserves existing safety-score semantics and assessment/storage logic.
+Keep jobs 18/10 active until two actual Blitz cycles and normalized assessments are verified.

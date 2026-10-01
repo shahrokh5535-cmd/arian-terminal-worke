@@ -1,5 +1,5 @@
 import { scheduleInterval } from "./schedule.js";
-const version = "0.9.0";
+const version = "0.10.0";
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://ctikvqtvzoaqqgnxqbgu.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const enabled = String(process.env.ENABLE_TOKEN_DISCOVERY || "true").toLowerCase() === "true";

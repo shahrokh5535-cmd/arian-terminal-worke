@@ -1,6 +1,7 @@
 # Collector migration status
 
 Project `ctikvqtvzoaqqgnxqbgu`; repository name remains `arian-terminal-worke`.
+Prepared worker: **0.10.0**, awaiting manual Blitz build.
 Live worker: **0.9.0** (startup 2026-10-01 11:24:34 UTC).
 All historical functions/jobs remain available. No retention, table drops, RLS relaxations, or scoring-weight changes.
 
@@ -11,6 +12,7 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Canonical Solana signatures | 5 | 0.8.1 | arian_external_ingest_solana_signatures_v1 | Migrated; 3 new signatures at 06:34 UTC, legacy inactive | Stop collector; enable 5 |
 | Solana details | 6 (mixed job split) | 0.8.1 | arian_external_claim_solana_transaction_details_v1 / arian_external_ingest_solana_transaction_detail_v1 | Two distinct successful cycles 06:31 and 06:34; 4 raw details, 0 errors. HTTP cutover ~06:38 UTC; job 6 active with DB-only command | Set ENABLE_SOLANA_DETAILS_INGEST=false; restore job 6 command SELECT public.arian_run_solana_transaction_worker(); active=true |
 | Canonical RugCheck SOL | 9 | 0.8.1 | arian_external_ingest_rugcheck_v1 | Migrated; external assessment success 06:30 UTC, job 9 inactive | Stop canonical collector; enable 9 |
+| Discovered-token risk HTTP | 18 mixed; 10 DB-local | 0.10.0 prepared | arian_external_claim_discovered_risk_v1 / arian_external_ingest_discovered_risk_v1 / arian_external_peek_discovered_risk_v1 | RPCs applied; rollback-only DB validation passed. Await Blitz deployment, shadow probe and two real cycles. 18/10 remain active | Set ENABLE_DISCOVERED_RISK_INGEST=false; ensure 18/10 active |
 | Discovered-token RugCheck finalizer | 10 (job 18 still enqueues HTTP) | DB-local | Existing arian_run_rugcheck_worker | Kept active: disabling it had stranded discovered-token assessments; two recovered at 05:48 UTC | Keep 10 active while 18 still enqueues |
 | Token Discovery | 12,13 | 0.8.1 | arian_external_ingest_token_discovery_v1 | Two cycles 06:31/06:39 successful, each 2 raw records; latter created 3 instances/events/scores. Job 12 disabled ~06:41; legacy drained, then 13 disabled | Set ENABLE_TOKEN_DISCOVERY=false; enable 12,13 |
 | Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
@@ -92,3 +94,24 @@ Claim ACLs/security_definer/search_path rechecked. This SQL/documentation update
 
 11:36 UTC downstream proof: a new swap was inserted at 11:36:00; job 6 DB-local cron succeeded.
 Jobs 20/23 inactive and 6/21/24/26 active. Canonical detail freshness correction now advances swap detection.
+
+## Discovered-risk preparation (2026-10-01 ~11:55 UTC)
+
+New RPCs keep legacy target selection and risk normalization/scoring DB-side.
+Claims lock asset rows with SKIP LOCKED, exclude pending legacy runs, cap at two,
+expire abandoned external claims after 15 minutes, and preserve dataset token_report_summary.
+404 backoff six hours; 429 ten minutes; other failures fifteen minutes.
+Run-ID locks make ingestion idempotent. ACL checks: SECURITY DEFINER,
+search_path=pg_catalog, no anon/authenticated execution, service_role/postgres only.
+Rolled-back SQL verified distinct claims, exact safety conversion, one raw event on retry,
+and failed-claim 404 backoff. No test assessments/runs were retained.
+Five module tests passed: read-only probe, failure isolation/release, identical retry,
+null-score rejection, and overlap lock. Full existing test suite also passed.
+Live /health and /status remain 200/v0.9.0; all nine collectors report success.
+Latest external runs 13659–13662 at 11:54 UTC succeeded with zero errors.
+No job 18 cutover yet; external scheduled risk evidence requires deployment.
+
+Social audit: over the sampled three hours, linked-post ingestion had 3 successes,
+14 failures and one running request; profile ingestion had 18 failures and no success.
+Jobs 30/32 are mixed HTTP/DB; 31/33 are DB-local. Leave all active while source
+stability is unresolved; no paid API introduced. Job 19 remains DB-only.

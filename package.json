@@ -1,6 +1,6 @@
 {
   "name": "arian-terminal-worker",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "External worker shell for ARIAN TERMINAL",
   "type": "module",
