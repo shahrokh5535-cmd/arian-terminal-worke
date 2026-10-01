@@ -56,3 +56,10 @@ Security advisor returned informational RLS-without-policy findings only; existi
 Provider audit: promoted market/signature collectors have recent successful runs; X mirror has both successes and failures and requires source stability checks before offload.
 The full production-function audit is stored outside the repository and is not published.
 Automatic approval initially rejected a push due to suspected audit disclosure; committed tree and credential scan proved the audit absent, and publishing was subsequently allowed.
+
+Final session freshness check at 05:52 UTC: 16 detail raw events recovered since 05:34;
+latest transaction detail **and swap** at 05:51 UTC. Jobs 6,10,26 have recent succeeded executions.
+Detail states: 6,513 processed, 2 pending, 851 unclaimed. Backlog remains and throughput should be measured after deployment.
+Worker code published at `d98aaa4`; local startup `/health` and `/status` return 200/version 0.8.1.
+Six Node tests passed; database success/idempotence/null-release checks passed and were rolled back.
+Blitz still reports 0.7.0; external Solana scheduled-write verification and collector cutovers are pending manual deployment.
