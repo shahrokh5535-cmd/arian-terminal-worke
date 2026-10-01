@@ -1,8 +1,7 @@
 # Collector migration status
 
 Project `ctikvqtvzoaqqgnxqbgu`; repository name remains `arian-terminal-worke`.
-Prepared worker: **0.10.0**, awaiting manual Blitz build.
-Live worker: **0.9.0** (startup 2026-10-01 11:24:34 UTC).
+Live worker: **0.10.0** (startup 2026-10-01 12:23:58 UTC).
 All historical functions/jobs remain available. No retention, table drops, RLS relaxations, or scoring-weight changes.
 
 | Collector | Legacy cron IDs | Worker | External RPC | Status / last verification | Rollback |
@@ -12,8 +11,8 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Canonical Solana signatures | 5 | 0.8.1 | arian_external_ingest_solana_signatures_v1 | Migrated; 3 new signatures at 06:34 UTC, legacy inactive | Stop collector; enable 5 |
 | Solana details | 6 (mixed job split) | 0.8.1 | arian_external_claim_solana_transaction_details_v1 / arian_external_ingest_solana_transaction_detail_v1 | Two distinct successful cycles 06:31 and 06:34; 4 raw details, 0 errors. HTTP cutover ~06:38 UTC; job 6 active with DB-only command | Set ENABLE_SOLANA_DETAILS_INGEST=false; restore job 6 command SELECT public.arian_run_solana_transaction_worker(); active=true |
 | Canonical RugCheck SOL | 9 | 0.8.1 | arian_external_ingest_rugcheck_v1 | Migrated; external assessment success 06:30 UTC, job 9 inactive | Stop canonical collector; enable 9 |
-| Discovered-token risk HTTP | 18 mixed; 10 DB-local | 0.10.0 prepared | arian_external_claim_discovered_risk_v1 / arian_external_ingest_discovered_risk_v1 / arian_external_peek_discovered_risk_v1 | RPCs applied; rollback-only DB validation passed. Await Blitz deployment, shadow probe and two real cycles. 18/10 remain active | Set ENABLE_DISCOVERED_RISK_INGEST=false; ensure 18/10 active |
-| Discovered-token RugCheck finalizer | 10 (job 18 still enqueues HTTP) | DB-local | Existing arian_run_rugcheck_worker | Kept active: disabling it had stranded discovered-token assessments; two recovered at 05:48 UTC | Keep 10 active while 18 still enqueues |
+| Discovered-token risk HTTP | 18 mixed; 10 DB-local | 0.10.0 | arian_external_claim_discovered_risk_v1 / arian_external_ingest_discovered_risk_v1 / arian_external_peek_discovered_risk_v1 | Migrated: batches 12:23/12:26 UTC, four successful runs, processed raw events and current risk verified. Job 18 disabled 12:27:13 UTC; DB-only 10 remains active | Set ENABLE_DISCOVERED_RISK_INGEST=false; ensure 18/10 active |
+| Discovered-token RugCheck finalizer | 10 (DB-local; 18 inactive) | DB-local | Existing arian_run_rugcheck_worker | Kept active: disabling it had stranded discovered-token assessments; two recovered at 05:48 UTC | Keep available for legacy drain/rollback |
 | Token Discovery | 12,13 | 0.8.1 | arian_external_ingest_token_discovery_v1 | Two cycles 06:31/06:39 successful, each 2 raw records; latter created 3 instances/events/scores. Job 12 disabled ~06:41; legacy drained, then 13 disabled | Set ENABLE_TOKEN_DISCOVERY=false; enable 12,13 |
 | Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
 | Promoted market snapshots | 20 HTTP/selection; 21 DB-local | 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Two cycles 11:26/11:29 successful, snapshots 3782/3785 and raw events verified, error_count=0. Job 20 disabled 11:33:24 UTC; DB-only 21 active | Stop new collector; ensure 20,21 active |
@@ -59,7 +58,7 @@ Rollback of selection alone: original definition remains in the initial preparat
 
 ## Remaining collector audit
 
-18: mixed DB selection plus RugCheck HTTP; split next, keep 10 finalizing.
+18: mixed DB selection plus RugCheck HTTP; HTTP migrated in 0.10.0, enqueue inactive; DB-only 10 retained.
 19: DB-local promotion, keep in Supabase.
 30: mixed DB target selection plus free FxTwitter HTTP; 31: DB-local response handling/scoring.
 32: mixed DB selection plus profile HTTP; 33: DB-local response handling/scoring.
@@ -115,3 +114,19 @@ Social audit: over the sampled three hours, linked-post ingestion had 3 successe
 14 failures and one running request; profile ingestion had 18 failures and no success.
 Jobs 30/32 are mixed HTTP/DB; 31/33 are DB-local. Leave all active while source
 stability is unresolved; no paid API introduced. Job 19 remains DB-only.
+
+## Discovered-risk production cutover (2026-10-01 12:27 UTC)
+
+0.10.0 health/status 200. New scheduler enabled, interval 600000 ms.
+Read-only /probe/discovered-risk: 200/success/writes_to_supabase=false.
+Two independent real scheduler batches: 13728/13729 at 12:23:54 and 13741/13742
+at 12:26:19 (a deployment restart occurred between these startup batches).
+All four transport=blitz_worker, success, error_count=0, records_fetched/inserted=1.
+Raw events 21171/21172/21187/21188 processed; corresponding asset_risk_current
+assessments advanced, safety scores 99/67/71/66. No synthetic test runs used.
+Guarded cutover disabled job 18 at 2026-10-01T12:27:13.928873Z.
+Jobs 10 and 19 remain active; no pending legacy RugCheck requests.
+Post-cutover status 12:27:20: worker 0.10.0, scheduler enabled, last batch success.
+Rollback: set ENABLE_DISCOVERED_RISK_INGEST=false, then
+SELECT cron.alter_job(18, active := true); keep job 10 active.
+No rebuild is needed for this documentation-only update.

@@ -32,4 +32,5 @@ most two eligible Solana tokens per cycle, respecting pending legacy requests an
 24-hour risk freshness. `/probe/discovered-risk` checks a known SOL mint without
 writing. Unsupported tokens receive a six-hour 404 backoff; 429 receives ten minutes.
 SQL preserves existing safety-score semantics and assessment/storage logic.
-Keep jobs 18/10 active until two actual Blitz cycles and normalized assessments are verified.
+Job 18 was disabled after two actual Blitz batches and normalized assessments were verified.
+DB-only job 10 remains available; see MIGRATION_STATUS.md for rollback.
