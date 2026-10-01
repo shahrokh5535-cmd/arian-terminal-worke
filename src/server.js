@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createXPublicSocialCollector } from "./x-public-social.js";
+import { createXProfileTimelineCollector } from "./x-profile-timeline.js";
 import { createDiscoveredRiskCollector } from "./discovered-risk.js";
 import { createPromotedCollector } from "./promoted.js";
 import { scheduleInterval } from "./schedule.js";
@@ -270,10 +271,15 @@ const xPublicSocial = createXPublicSocialCollector({ rpc, fetchJson,
   enabled: String(process.env.ENABLE_X_PUBLIC_SOCIAL_INGEST || "true").toLowerCase() === "true",
   intervalMs: process.env.X_PUBLIC_SOCIAL_INTERVAL_MS });
 
+const xProfileTimeline = createXProfileTimelineCollector({ rpc, fetchJson,
+  enabled: String(process.env.ENABLE_X_PROFILE_TIMELINE_INGEST || "true").toLowerCase() === "true",
+  intervalMs: process.env.X_PROFILE_TIMELINE_INTERVAL_MS });
+
 function schedulerStatus() {
   return {
     service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY),
     x_public_social: xPublicSocial.status(),
+    x_profile_timeline: xProfileTimeline.status(),
     discovered_risk: discoveredRisk.status(),
     token_discovery: tokenDiscoveryStatus(),
     promoted_market: promotedMarket.status(),
@@ -288,7 +294,7 @@ function schedulerStatus() {
 }
 
 function startSchedulers() {
-  for (const [collector, delay] of [[promotedMarket, 110_000], [promotedSignatures, 125_000], [discoveredRisk, 140_000], [xPublicSocial, 155_000]]) {
+  for (const [collector, delay] of [[promotedMarket, 110_000], [promotedSignatures, 125_000], [discoveredRisk, 140_000], [xPublicSocial, 155_000], [xProfileTimeline, 170_000]]) {
     if (SUPABASE_SERVICE_ROLE_KEY && collector.status().enabled) {
       const tick = () => collector.run().catch(() => {});
       setTimeout(tick, delay);
@@ -322,7 +328,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { x_public_social_enabled: xPublicSocial.status().enabled, discovered_risk_enabled: discoveredRisk.status().enabled, dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, token_discovery_enabled: tokenDiscoveryStatus().enabled, solana_details_enabled: solanaDetails.status().enabled, promoted_market_enabled: promotedMarket.status().enabled, promoted_signatures_enabled: promotedSignatures.status().enabled, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
+      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { x_public_social_enabled: xPublicSocial.status().enabled, x_profile_timeline_enabled: xProfileTimeline.status().enabled, discovered_risk_enabled: discoveredRisk.status().enabled, dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, token_discovery_enabled: tokenDiscoveryStatus().enabled, solana_details_enabled: solanaDetails.status().enabled, promoted_market_enabled: promotedMarket.status().enabled, promoted_signatures_enabled: promotedSignatures.status().enabled, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
     }
     if (req.method === "GET" && url.pathname === "/status") return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, scheduler: schedulerStatus(), now: new Date().toISOString() });
     if (req.method === "GET" && url.pathname === "/probe/x-social") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await xPublicSocial.probe()) });
