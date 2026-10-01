@@ -18,7 +18,7 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Promoted market snapshots | 20 HTTP/selection; 21 DB-local | 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Two cycles 11:26/11:29 successful, snapshots 3782/3785 and raw events verified, error_count=0. Job 20 disabled 11:33:24 UTC; DB-only 21 active | Stop new collector; ensure 20,21 active |
 | Promoted pool signatures | 23 HTTP/selection; 24 DB-local | 0.9.0 | arian_external_claim_promoted_signatures_v1 / arian_external_peek_promoted_signatures_v1 / arian_external_ingest_promoted_signatures_v1 | Two cycles 11:26/11:29 successful, 3 signatures matched normalized transactions per batch, error_count=0. Job 23 disabled 11:33:24 UTC; DB-only 24 active | Stop new collector; ensure 23,24 active |
 | X linked public posts | 30 mixed; 31 DB-local | 0.11.0 | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | Deployed; probe success, first real scheduler run 13958 at 13:57 UTC verified. Await second cycle; 30/31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
-| X profile timelines | 32 mixed; 33 DB-local | legacy | Existing functions | Source endpoint returns 404; no cutover or replacement claimed | Keep 32/33 available |
+| X profile timelines | 32 mixed; 33 DB-local | legacy | Existing functions | Selected account unavailable (404); same endpoint works for Solana. Handle backoff applied; legacy HTTP retained | Keep 32/33 available |
 
 ## Production cutover evidence
 
@@ -193,3 +193,21 @@ Raw event 21426 processed, content 923 has text, token mention exists, DB social
 Job 30 remains active until a second successful scheduler cycle is verified.
 Rollback of this shadow drain alone: remove the pre-lock legacy drain block from the
 claim RPC; original guard then returns pending_linked_post until job 31 processes it.
+
+## Profile source diagnosis / selection backoff (2026-10-01 14:05 UTC)
+
+Upstream current routes document /2/profile/{handle}/statuses:
+https://github.com/FxEmbed/FxEmbed/blob/main/src/realms/api/routes.ts
+Read-only HTTP tests: peeledstickers profile and timeline return 404/User not found;
+the same timeline endpoint for Solana returns 200 with posts. The endpoint itself
+is available; production's first eligible account was monopolizing polling slots.
+All 18 sampled three-hour profile failures targeted peeledstickers / asset instance 35.
+`db/x_profile_legacy_backoff.sql` preserves existing function name, HTTP endpoint,
+normalization, privilege ACL and SECURITY INVOKER behavior. It adds only a handle-level
+failed-request backoff (404 six hours, other failures fifteen minutes), allowing
+existing next-target selection to continue to other accounts.
+Rolled-back validation: asset instance 35 returned NULL and created no new run/request.
+Jobs 32/33 remain active; this is a selection repair, not an external profile cutover.
+A successful next-account scheduled profile ingestion still needs verification.
+Rollback: remove the marked backoff IF block from this preparation definition.
+No API key, X account login, paid service, Node change or rebuild is required.
