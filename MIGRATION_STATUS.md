@@ -89,3 +89,6 @@ succeeded after jobs 20/23 were disabled; one raw event each, error_count=0. No 
 Balanced detail selection succeeded in real Blitz runs 13619/13620: canonical block 11:29:26 and
 oldest backlog block 07:23:22 both processed at 11:34, preserving the existing two-fetch budget.
 Claim ACLs/security_definer/search_path rechecked. This SQL/documentation update needs no Blitz rebuild.
+
+11:36 UTC downstream proof: a new swap was inserted at 11:36:00; job 6 DB-local cron succeeded.
+Jobs 20/23 inactive and 6/21/24/26 active. Canonical detail freshness correction now advances swap detection.
