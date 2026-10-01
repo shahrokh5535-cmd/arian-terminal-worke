@@ -2,25 +2,30 @@ import http from "node:http";
 
 const port = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
-const version = "0.4.0";
+const version = "0.5.0";
 
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DEXSCREENER_URL = `https://api.dexscreener.com/token-pairs/v1/solana/${WSOL_MINT}`;
 const JUPITER_QUOTE_URL = `https://api.jup.ag/swap/v1/quote?inputMint=${WSOL_MINT}&outputMint=${USDC_MINT}&amount=1000000000&slippageBps=50`;
+const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
+const RAYDIUM_SOL_USDC_POOL = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://ctikvqtvzoaqqgnxqbgu.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const ENABLE_DEXSCREENER_INGEST = String(process.env.ENABLE_DEXSCREENER_INGEST || "false").toLowerCase() === "true";
 const ENABLE_JUPITER_INGEST = String(process.env.ENABLE_JUPITER_INGEST || "false").toLowerCase() === "true";
+const ENABLE_SOLANA_RPC_INGEST = String(process.env.ENABLE_SOLANA_RPC_INGEST || "false").toLowerCase() === "true";
 
 const DEXSCREENER_INTERVAL_MS = Math.max(60_000, Number(process.env.DEXSCREENER_INTERVAL_MS || 300_000));
 const JUPITER_INTERVAL_MS = Math.max(60_000, Number(process.env.JUPITER_INTERVAL_MS || 300_000));
+const SOLANA_RPC_INTERVAL_MS = Math.max(60_000, Number(process.env.SOLANA_RPC_INTERVAL_MS || 300_000));
 
 const state = {
   dexscreener: { running: false, lastRun: null, timer: null },
-  jupiter: { running: false, lastRun: null, timer: null }
+  jupiter: { running: false, lastRun: null, timer: null },
+  solana_rpc: { running: false, lastRun: null, timer: null }
 };
 
 function sendJson(res, statusCode, body) {
@@ -91,6 +96,52 @@ async function fetchJupiterQuote() {
   if (!quote?.inAmount || !quote?.outAmount) throw new Error("Jupiter quote is missing amounts");
 
   return { quote, latencyMs: Date.now() - started, checkedAt: new Date().toISOString() };
+}
+
+async function fetchSolanaPoolSignatures() {
+  const started = Date.now();
+  const response = await fetch(SOLANA_RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": `arian-terminal-worker/${version}` },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress",
+      params: [RAYDIUM_SOL_USDC_POOL, { limit: 3, commitment: "finalized" }]
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!response.ok) throw new Error(`Solana RPC HTTP ${response.status}`);
+  const payload = await response.json();
+  if (payload?.error) throw new Error(`Solana RPC error: ${JSON.stringify(payload.error)}`);
+  if (!Array.isArray(payload?.result)) throw new Error("Solana RPC result is not an array");
+  return { result: payload.result, latencyMs: Date.now() - started, checkedAt: new Date().toISOString() };
+}
+
+async function runSolanaRpc({ write = false } = {}) {
+  const s = state.solana_rpc;
+  if (s.running) return { status: "skipped", reason: "already_running", at: new Date().toISOString() };
+  s.running = true;
+  const runStartedAt = new Date().toISOString();
+  try {
+    const result = await fetchSolanaPoolSignatures();
+    const db = write ? await rpc("arian_external_ingest_solana_signatures_v1", { p_result: result.result, p_checked_at: result.checkedAt }) : null;
+    s.lastRun = {
+      status: "success", mode: write ? "external_ingest" : "shadow_probe",
+      started_at: runStartedAt, finished_at: new Date().toISOString(), provider: "solana_rpc",
+      monitored_address: RAYDIUM_SOL_USDC_POOL, signatures_fetched: result.result.length,
+      latency_ms: result.latencyMs, checked_at: result.checkedAt,
+      writes_to_supabase: Boolean(write), database_result: db
+    };
+    console.log(JSON.stringify({ event: "solana_rpc_run", ...s.lastRun }));
+    return s.lastRun;
+  } catch (error) {
+    s.lastRun = {
+      status: "error", mode: write ? "external_ingest" : "shadow_probe",
+      started_at: runStartedAt, finished_at: new Date().toISOString(),
+      error: error instanceof Error ? error.message : "unknown_error", writes_to_supabase: Boolean(write)
+    };
+    console.error(JSON.stringify({ event: "solana_rpc_run", ...s.lastRun }));
+    throw error;
+  } finally { s.running = false; }
 }
 
 async function runDexScreener({ write = false } = {}) {
@@ -177,6 +228,12 @@ function schedulerStatus() {
       interval_ms: JUPITER_INTERVAL_MS,
       running: state.jupiter.running,
       last_run: state.jupiter.lastRun
+    },
+    solana_rpc: {
+      enabled: ENABLE_SOLANA_RPC_INGEST,
+      interval_ms: SOLANA_RPC_INTERVAL_MS,
+      running: state.solana_rpc.running,
+      last_run: state.solana_rpc.lastRun
     }
   };
 }
@@ -195,6 +252,13 @@ function startSchedulers() {
     state.jupiter.timer = setInterval(tick, JUPITER_INTERVAL_MS);
     state.jupiter.timer.unref?.();
   }
+
+  if (SUPABASE_SERVICE_ROLE_KEY && ENABLE_SOLANA_RPC_INGEST) {
+    const tick = () => runSolanaRpc({ write: true }).catch(() => {});
+    setTimeout(tick, 35_000);
+    state.solana_rpc.timer = setInterval(tick, SOLANA_RPC_INTERVAL_MS);
+    state.solana_rpc.timer.unref?.();
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -208,6 +272,7 @@ const server = http.createServer(async (req, res) => {
         scheduler: {
           dexscreener_enabled: ENABLE_DEXSCREENER_INGEST,
           jupiter_enabled: ENABLE_JUPITER_INGEST,
+          solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST,
           service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY)
         }
       });
@@ -224,6 +289,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/probe/jupiter") {
       const result = await runJupiter({ write: false });
+      return sendJson(res, 200, { service: "arian-terminal-worker", version, ...result });
+    }
+
+    if (req.method === "GET" && url.pathname === "/probe/solana-rpc") {
+      const result = await runSolanaRpc({ write: false });
       return sendJson(res, 200, { service: "arian-terminal-worker", version, ...result });
     }
 
