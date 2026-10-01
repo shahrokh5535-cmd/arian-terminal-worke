@@ -59,3 +59,10 @@ test("overlapping schedules are skipped", async () => {
   release();
   await assert.rejects(run, /No signature/);
 });
+
+import { scheduleInterval } from "../src/schedule.js";
+test("invalid intervals cannot turn into millisecond polling loops", () => {
+  for (const value of ["invalid", "Infinity", "0", "-1", "999999999999"])
+    assert.equal(scheduleInterval(value, 300000, 600000), 600000);
+  assert.equal(scheduleInterval("1000", 300000, 600000), 300000);
+});

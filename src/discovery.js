@@ -1,8 +1,9 @@
+import { scheduleInterval } from "./schedule.js";
 const version = "0.8.1";
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://ctikvqtvzoaqqgnxqbgu.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const enabled = String(process.env.ENABLE_TOKEN_DISCOVERY || "true").toLowerCase() === "true";
-const intervalMs = Math.max(600_000, Number(process.env.TOKEN_DISCOVERY_INTERVAL_MS) || 600_000);
+const intervalMs = scheduleInterval(process.env.TOKEN_DISCOVERY_INTERVAL_MS, 600_000, 600_000);
 let running = false;
 let lastRun = null;
 export const tokenDiscoveryStatus = () => ({ enabled, interval_ms: intervalMs, running, last_run: lastRun });

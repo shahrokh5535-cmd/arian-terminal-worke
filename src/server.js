@@ -1,4 +1,5 @@
 import http from "node:http";
+import { scheduleInterval } from "./schedule.js";
 import { createSolanaDetails } from "./solana-details.js";
 import { runTokenDiscovery, tokenDiscoveryStatus, startTokenDiscoveryScheduler } from "./discovery.js";
 
@@ -24,11 +25,11 @@ const ENABLE_SOLANA_RPC_INGEST = String(process.env.ENABLE_SOLANA_RPC_INGEST || 
 const ENABLE_RUGCHECK_INGEST = String(process.env.ENABLE_RUGCHECK_INGEST || "true").toLowerCase() === "true";
 const ENABLE_JUPITER_TOKEN_ENRICHMENT = String(process.env.ENABLE_JUPITER_TOKEN_ENRICHMENT || "true").toLowerCase() === "true";
 
-const DEXSCREENER_INTERVAL_MS = Math.max(300_000, Number(process.env.DEXSCREENER_INTERVAL_MS || 300_000));
-const JUPITER_INTERVAL_MS = Math.max(300_000, Number(process.env.JUPITER_INTERVAL_MS || 300_000));
-const SOLANA_RPC_INTERVAL_MS = Math.max(300_000, Number(process.env.SOLANA_RPC_INTERVAL_MS || 300_000));
-const RUGCHECK_INTERVAL_MS = Math.max(300_000, Number(process.env.RUGCHECK_INTERVAL_MS || 3_600_000));
-const JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS = Math.max(300_000, Number(process.env.JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS || 300_000));
+const DEXSCREENER_INTERVAL_MS = scheduleInterval(process.env.DEXSCREENER_INTERVAL_MS, 300000, 300000);
+const JUPITER_INTERVAL_MS = scheduleInterval(process.env.JUPITER_INTERVAL_MS, 300000, 300000);
+const SOLANA_RPC_INTERVAL_MS = scheduleInterval(process.env.SOLANA_RPC_INTERVAL_MS, 300000, 300000);
+const RUGCHECK_INTERVAL_MS = scheduleInterval(process.env.RUGCHECK_INTERVAL_MS, 3600000, 3600000);
+const JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS = scheduleInterval(process.env.JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS, 300000, 300000);
 
 const state = {
   dexscreener: { running: false, lastRun: null, timer: null },
