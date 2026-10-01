@@ -1,1 +1,14 @@
-{"name":"arian-terminal-worker","version":"0.8.0","private":true,"description":"External worker shell for ARIAN TERMINAL","type":"module","scripts":{"start":"node src/main.js"},"engines":{"node":">=20"}}
+{
+  "name": "arian-terminal-worker",
+  "version": "0.8.1",
+  "private": true,
+  "description": "External worker shell for ARIAN TERMINAL",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

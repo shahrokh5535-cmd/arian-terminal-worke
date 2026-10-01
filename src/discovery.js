@@ -1,9 +1,11 @@
-const version = "0.8.0-discovery";
+const version = "0.8.1";
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://ctikvqtvzoaqqgnxqbgu.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const enabled = String(process.env.ENABLE_TOKEN_DISCOVERY || "true").toLowerCase() === "true";
-const intervalMs = Math.max(300_000, Number(process.env.TOKEN_DISCOVERY_INTERVAL_MS || 600_000));
+const intervalMs = Math.max(600_000, Number(process.env.TOKEN_DISCOVERY_INTERVAL_MS) || 600_000);
 let running = false;
+let lastRun = null;
+export const tokenDiscoveryStatus = () => ({ enabled, interval_ms: intervalMs, running, last_run: lastRun });
 
 async function rpc(name, body = {}) {
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
@@ -22,7 +24,7 @@ async function rpc(name, body = {}) {
   const text = await response.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { raw: text.slice(0, 500) }; }
-  if (!response.ok) throw new Error(`Supabase RPC ${response.status}: ${JSON.stringify(parsed)}`);
+  if (!response.ok) throw new Error(`Supabase RPC ${name} HTTP ${response.status}`);
   return parsed;
 }
 
@@ -38,7 +40,7 @@ async function fetchJson(url) {
   return payload;
 }
 
-export async function runTokenDiscovery() {
+export async function runTokenDiscovery({ write = false } = {}) {
   if (running) return { status: "skipped", reason: "already_running" };
   running = true;
   const startedAt = new Date().toISOString();
@@ -58,15 +60,18 @@ export async function runTokenDiscovery() {
     }
 
     const checkedAt = new Date().toISOString();
-    const db = await rpc("arian_external_ingest_token_discovery_v1", {
+    const db = write ? await rpc("arian_external_ingest_token_discovery_v1", {
       p_profiles: profiles,
       p_pairs: pairs,
       p_checked_at: checkedAt
-    });
+    }) : null;
+    if (write && db?.status !== "success") throw new Error("Discovery ingestion did not succeed");
     const result = {
       event: "token_discovery_run",
       status: "success",
-      mode: "external_ingest",
+      mode: write ? "external_ingest" : "shadow_probe",
+      provider: "dexscreener",
+      writes_to_supabase: Boolean(write),
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       profiles_fetched: profiles.length,
@@ -75,17 +80,21 @@ export async function runTokenDiscovery() {
       checked_at: checkedAt,
       database_result: db
     };
+    if (write) lastRun = result;
     console.log(JSON.stringify(result));
     return result;
   } catch (error) {
     const result = {
       event: "token_discovery_run",
       status: "error",
-      mode: "external_ingest",
+      mode: write ? "external_ingest" : "shadow_probe",
+      provider: "dexscreener",
+      writes_to_supabase: Boolean(write),
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       error: error instanceof Error ? error.message : "unknown_error"
     };
+    if (write) lastRun = result;
     console.error(JSON.stringify(result));
     throw error;
   } finally {
@@ -93,9 +102,12 @@ export async function runTokenDiscovery() {
   }
 }
 
-if (enabled && SUPABASE_SERVICE_ROLE_KEY) {
-  const tick = () => runTokenDiscovery().catch(() => {});
+export function startTokenDiscoveryScheduler() {
+ if (enabled && SUPABASE_SERVICE_ROLE_KEY) {
+  const tick = () => runTokenDiscovery({ write: true }).catch(() => {});
   setTimeout(tick, 80_000);
   const timer = setInterval(tick, intervalMs);
   timer.unref?.();
+}
+
 }

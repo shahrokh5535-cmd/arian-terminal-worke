@@ -1,8 +1,10 @@
 import http from "node:http";
+import { createSolanaDetails } from "./solana-details.js";
+import { runTokenDiscovery, tokenDiscoveryStatus, startTokenDiscoveryScheduler } from "./discovery.js";
 
 const port = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
-const version = "0.7.0";
+const version = "0.8.1";
 
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -22,11 +24,11 @@ const ENABLE_SOLANA_RPC_INGEST = String(process.env.ENABLE_SOLANA_RPC_INGEST || 
 const ENABLE_RUGCHECK_INGEST = String(process.env.ENABLE_RUGCHECK_INGEST || "true").toLowerCase() === "true";
 const ENABLE_JUPITER_TOKEN_ENRICHMENT = String(process.env.ENABLE_JUPITER_TOKEN_ENRICHMENT || "true").toLowerCase() === "true";
 
-const DEXSCREENER_INTERVAL_MS = Math.max(60_000, Number(process.env.DEXSCREENER_INTERVAL_MS || 300_000));
-const JUPITER_INTERVAL_MS = Math.max(60_000, Number(process.env.JUPITER_INTERVAL_MS || 300_000));
-const SOLANA_RPC_INTERVAL_MS = Math.max(60_000, Number(process.env.SOLANA_RPC_INTERVAL_MS || 300_000));
+const DEXSCREENER_INTERVAL_MS = Math.max(300_000, Number(process.env.DEXSCREENER_INTERVAL_MS || 300_000));
+const JUPITER_INTERVAL_MS = Math.max(300_000, Number(process.env.JUPITER_INTERVAL_MS || 300_000));
+const SOLANA_RPC_INTERVAL_MS = Math.max(300_000, Number(process.env.SOLANA_RPC_INTERVAL_MS || 300_000));
 const RUGCHECK_INTERVAL_MS = Math.max(300_000, Number(process.env.RUGCHECK_INTERVAL_MS || 3_600_000));
-const JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS = Math.max(60_000, Number(process.env.JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS || 300_000));
+const JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS = Math.max(300_000, Number(process.env.JUPITER_TOKEN_ENRICHMENT_INTERVAL_MS || 300_000));
 
 const state = {
   dexscreener: { running: false, lastRun: null, timer: null },
@@ -61,7 +63,7 @@ async function rpc(name, body = {}) {
   const text = await response.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { raw: text.slice(0, 500) }; }
-  if (!response.ok) throw new Error(`Supabase RPC ${response.status}: ${JSON.stringify(parsed)}`);
+  if (!response.ok) throw new Error(`Supabase RPC ${name} HTTP ${response.status}`);
   return parsed;
 }
 
@@ -186,13 +188,25 @@ async function runRugCheck({ write = false } = {}) {
   } finally { s.running = false; }
 }
 
+async function probeJupiterTokenEnrichment(mint = WSOL_MINT) {
+  const started = Date.now();
+  const tokens = await fetchJson(`https://api.jup.ag/tokens/v2/search?query=${encodeURIComponent(mint)}`);
+  if (!tokens.response.ok || !Array.isArray(tokens.payload)) throw new Error(`Jupiter token search HTTP ${tokens.response.status}`);
+  const token = tokens.payload.find(x => x?.id === mint);
+  if (!token || !Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 18) throw new Error("Invalid Jupiter token response");
+  const quote = await fetchJupiterQuote();
+  return { status: "success", mode: "shadow_probe", provider: "jupiter", writes_to_supabase: false, mint, decimals: token.decimals,
+    route_available: Boolean(quote.quote.routePlan?.length), latency_ms: Date.now() - started, checked_at: new Date().toISOString() };
+}
+
 async function runJupiterTokenEnrichment() {
   const s = state.jupiter_token_enrichment;
   if (s.running) return { status: "skipped", reason: "already_running" };
   s.running = true;
   const runStartedAt = new Date().toISOString();
+  let claim;
   try {
-    const claim = await rpc("arian_external_claim_jupiter_token_enrichment_v1", {});
+    claim = await rpc("arian_external_claim_jupiter_token_enrichment_v1", {});
     if (!claim || claim.status === "idle") {
       s.lastRun = { status: "idle", mode: "external_ingest", started_at: runStartedAt, finished_at: new Date().toISOString(), provider: "jupiter", dataset: "tokens_v2_search", writes_to_supabase: false };
       return s.lastRun;
@@ -210,7 +224,10 @@ async function runJupiterTokenEnrichment() {
     const amount = (10n ** BigInt(decimals)).toString();
     const routeUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${encodeURIComponent(claim.mint)}&outputMint=${WSOL_MINT}&amount=${amount}&slippageBps=100`;
     const routeFetch = await fetchJson(routeUrl);
-    const routeAvailable = routeFetch.response.ok && routeFetch.payload && !routeFetch.payload.error;
+    const noRoute = ["COULD_NOT_FIND_ANY_ROUTE", "TOKEN_NOT_TRADABLE", "NO_ROUTES_FOUND"].includes(routeFetch.payload?.errorCode);
+    if (!routeFetch.response.ok && !noRoute) throw new Error(`Jupiter route HTTP ${routeFetch.response.status}`);
+    const routeAvailable = routeFetch.response.ok && Array.isArray(routeFetch.payload?.routePlan) && routeFetch.payload.routePlan.length > 0 && routeFetch.payload.inputMint === claim.mint;
+    if (routeFetch.response.ok && !routeAvailable) throw new Error("Invalid Jupiter route payload");
     const checkedAt = new Date().toISOString();
     const db = await rpc("arian_external_ingest_jupiter_token_enrichment_v1", {
       p_run_id: claim.run_id,
@@ -219,19 +236,26 @@ async function runJupiterTokenEnrichment() {
       p_route_available: Boolean(routeAvailable),
       p_checked_at: checkedAt
     });
+    if (db?.status !== "success") throw new Error("Jupiter enrichment ingestion did not succeed");
     s.lastRun = { status: "success", mode: "external_ingest", started_at: runStartedAt, finished_at: new Date().toISOString(), provider: "jupiter", dataset: "tokens_v2_search", run_id: claim.run_id, asset_instance_id: claim.asset_instance_id, mint: claim.mint, route_available: Boolean(routeAvailable), checked_at: checkedAt, writes_to_supabase: true, database_result: db };
     console.log(JSON.stringify({ event: "jupiter_token_enrichment_run", ...s.lastRun }));
     return s.lastRun;
   } catch (error) {
+    if (claim?.run_id) await rpc("arian_external_fail_jupiter_token_enrichment_v1", { p_run_id: claim.run_id, p_error: "External Jupiter collection failed" }).catch(() => {});
     s.lastRun = { status: "error", mode: "external_ingest", started_at: runStartedAt, finished_at: new Date().toISOString(), provider: "jupiter", dataset: "tokens_v2_search", error: error instanceof Error ? error.message : "unknown_error", writes_to_supabase: true };
     console.error(JSON.stringify({ event: "jupiter_token_enrichment_run", ...s.lastRun }));
     throw error;
   } finally { s.running = false; }
 }
 
+const solanaDetails = createSolanaDetails({ rpc, fetchJson, fetchSignatures: fetchSolanaPoolSignatures,
+  enabled: ENABLE_SOLANA_RPC_INGEST && String(process.env.ENABLE_SOLANA_DETAILS_INGEST || "true").toLowerCase() === "true" });
+
 function schedulerStatus() {
   return {
     service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+    token_discovery: tokenDiscoveryStatus(),
+    solana_details: solanaDetails.status(),
     dexscreener: { enabled: ENABLE_DEXSCREENER_INGEST, interval_ms: DEXSCREENER_INTERVAL_MS, running: state.dexscreener.running, last_run: state.dexscreener.lastRun },
     jupiter: { enabled: ENABLE_JUPITER_INGEST, interval_ms: JUPITER_INTERVAL_MS, running: state.jupiter.running, last_run: state.jupiter.lastRun },
     solana_rpc: { enabled: ENABLE_SOLANA_RPC_INGEST, interval_ms: SOLANA_RPC_INTERVAL_MS, running: state.solana_rpc.running, last_run: state.solana_rpc.lastRun },
@@ -241,6 +265,12 @@ function schedulerStatus() {
 }
 
 function startSchedulers() {
+  startTokenDiscoveryScheduler();
+  if (SUPABASE_SERVICE_ROLE_KEY && solanaDetails.status().enabled) {
+    const tick = () => solanaDetails.run().catch(() => {});
+    setTimeout(tick, 95_000);
+    setInterval(tick, solanaDetails.status().interval_ms).unref?.();
+  }
   if (SUPABASE_SERVICE_ROLE_KEY && ENABLE_DEXSCREENER_INGEST) {
     const tick = () => runDexScreener({ write: true }).catch(() => {}); setTimeout(tick, 5_000); state.dexscreener.timer = setInterval(tick, DEXSCREENER_INTERVAL_MS); state.dexscreener.timer.unref?.();
   }
@@ -262,9 +292,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
+      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, token_discovery_enabled: tokenDiscoveryStatus().enabled, solana_details_enabled: solanaDetails.status().enabled, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
     }
     if (req.method === "GET" && url.pathname === "/status") return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, scheduler: schedulerStatus(), now: new Date().toISOString() });
+    if (req.method === "GET" && url.pathname === "/probe/jupiter-token-enrichment") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await probeJupiterTokenEnrichment()) });
+    if (req.method === "GET" && url.pathname === "/probe/token-discovery") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await runTokenDiscovery({ write: false })) });
+    if (req.method === "GET" && url.pathname === "/probe/solana-details") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await solanaDetails.probe()) });
     if (req.method === "GET" && url.pathname === "/probe/dexscreener") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await runDexScreener({ write: false })) });
     if (req.method === "GET" && url.pathname === "/probe/jupiter") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await runJupiter({ write: false })) });
     if (req.method === "GET" && url.pathname === "/probe/solana-rpc") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await runSolanaRpc({ write: false })) });
