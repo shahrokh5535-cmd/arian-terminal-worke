@@ -17,7 +17,7 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
 | Promoted market snapshots | 20 HTTP/selection; 21 DB-local | 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Two cycles 11:26/11:29 successful, snapshots 3782/3785 and raw events verified, error_count=0. Job 20 disabled 11:33:24 UTC; DB-only 21 active | Stop new collector; ensure 20,21 active |
 | Promoted pool signatures | 23 HTTP/selection; 24 DB-local | 0.9.0 | arian_external_claim_promoted_signatures_v1 / arian_external_peek_promoted_signatures_v1 / arian_external_ingest_promoted_signatures_v1 | Two cycles 11:26/11:29 successful, 3 signatures matched normalized transactions per batch, error_count=0. Job 23 disabled 11:33:24 UTC; DB-only 24 active | Stop new collector; ensure 23,24 active |
-| X linked public posts | 30 mixed; 31 DB-local | 0.11.0 | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | Deployed; probe success, first real scheduler run 13958 at 13:57 UTC verified. Await second cycle; 30/31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
+| X linked public posts | 30 mixed; 31 DB-local | 0.11.0 | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | Migrated: two cycles 13958/13981 at 13:57/14:07 UTC verified, zero errors. Job 30 disabled 14:08:54 UTC; DB-only 31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
 | X profile timelines | 32 mixed; 33 DB-local | legacy | Existing functions | Selected account unavailable (404); same endpoint works for Solana. Handle backoff applied; legacy HTTP retained | Keep 32/33 available |
 
 ## Production cutover evidence
@@ -62,7 +62,7 @@ Rollback of selection alone: original definition remains in the initial preparat
 
 18: mixed DB selection plus RugCheck HTTP; HTTP migrated in 0.10.0, enqueue inactive; DB-only 10 retained.
 19: DB-local promotion, keep in Supabase.
-30: mixed DB target selection plus free FxTwitter HTTP; 31: DB-local response handling/scoring.
+30: mixed DB target selection plus free FxTwitter HTTP, now externally migrated/inactive; 31: DB-local response handling/scoring remains active.
 32: mixed DB selection plus profile HTTP; 33: DB-local response handling/scoring.
 X mirror has recent successes and failures; source stability must be proven before any legacy cutover.
 
@@ -211,3 +211,23 @@ Jobs 32/33 remain active; this is a selection repair, not an external profile cu
 A successful next-account scheduled profile ingestion still needs verification.
 Rollback: remove the marked backoff IF block from this preparation definition.
 No API key, X account login, paid service, Node change or rebuild is required.
+
+## X linked-public-post production cutover (2026-10-01 14:08 UTC)
+
+Live 0.11.0 started 13:27:49 UTC. /health,/status,/probe/x-social returned 200;
+probe success, writes_to_supabase=false. Scheduler enabled, interval 600000 ms.
+Two independent real Blitz scheduler cycles ten minutes apart:
+run 13958 at 13:57:51 and run 13981 at 14:07:51, both success/error_count=0,
+records_fetched=1/records_inserted=1, collector=x_public_social, transport=blitz_worker.
+Raw events 21426/21448 processed; content 923/925 nonempty; mentions and current
+asset_social_scores_v2 last-source metadata verified for both instances.
+DB social score/confidence returned 48.25/65.75, preserving existing scoring policy.
+The already-ready legacy responses were finalized DB-side without new HTTP.
+Guarded cutover disabled only job 30 at 2026-10-01T14:08:54.336067Z.
+Jobs 31,32,33 remain active; pending legacy linked-post requests = 0.
+Post-cutover health/status: 200/v0.11.0; all eleven external collectors enabled
+and last status success. Latest external X success 14:07:53 remains fresh.
+Rollback: set ENABLE_X_PUBLIC_SOCIAL_INGEST=false, then
+SELECT cron.alter_job(30, active := true); keep DB-only job 31 active.
+This completes linked-post HTTP offload, not broad X news search or profile HTTP migration.
+All changes after the original deployment were SQL/documentation only; no further Blitz build needed.
