@@ -1,11 +1,12 @@
 import http from "node:http";
+import { createPromotedCollector } from "./promoted.js";
 import { scheduleInterval } from "./schedule.js";
 import { createSolanaDetails } from "./solana-details.js";
 import { runTokenDiscovery, tokenDiscoveryStatus, startTokenDiscoveryScheduler } from "./discovery.js";
 
 const port = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
-const version = "0.8.1";
+const version = "0.9.0";
 
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -47,7 +48,7 @@ function sendJson(res, statusCode, body) {
   res.end(JSON.stringify(body));
 }
 
-async function rpc(name, body = {}) {
+async function rpc(name, body = {}, timeoutMs = 15_000) {
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: "POST",
@@ -59,7 +60,7 @@ async function rpc(name, body = {}) {
       "User-Agent": `arian-terminal-worker/${version}`
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   const text = await response.text();
   let parsed = null;
@@ -252,10 +253,19 @@ async function runJupiterTokenEnrichment() {
 const solanaDetails = createSolanaDetails({ rpc, fetchJson, fetchSignatures: fetchSolanaPoolSignatures,
   enabled: ENABLE_SOLANA_RPC_INGEST && String(process.env.ENABLE_SOLANA_DETAILS_INGEST || "true").toLowerCase() === "true" });
 
+const promotedMarket = createPromotedCollector({ kind: "market", rpc, fetchJson,
+  enabled: String(process.env.ENABLE_PROMOTED_MARKET_INGEST || "true").toLowerCase() === "true",
+  intervalMs: scheduleInterval(process.env.PROMOTED_MARKET_INTERVAL_MS, 300_000, 300_000) });
+const promotedSignatures = createPromotedCollector({ kind: "signatures", rpc, fetchJson,
+  enabled: String(process.env.ENABLE_PROMOTED_SIGNATURES_INGEST || "true").toLowerCase() === "true",
+  intervalMs: scheduleInterval(process.env.PROMOTED_SIGNATURES_INTERVAL_MS, 300_000, 300_000) });
+
 function schedulerStatus() {
   return {
     service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY),
     token_discovery: tokenDiscoveryStatus(),
+    promoted_market: promotedMarket.status(),
+    promoted_signatures: promotedSignatures.status(),
     solana_details: solanaDetails.status(),
     dexscreener: { enabled: ENABLE_DEXSCREENER_INGEST, interval_ms: DEXSCREENER_INTERVAL_MS, running: state.dexscreener.running, last_run: state.dexscreener.lastRun },
     jupiter: { enabled: ENABLE_JUPITER_INGEST, interval_ms: JUPITER_INTERVAL_MS, running: state.jupiter.running, last_run: state.jupiter.lastRun },
@@ -266,6 +276,13 @@ function schedulerStatus() {
 }
 
 function startSchedulers() {
+  for (const [collector, delay] of [[promotedMarket, 110_000], [promotedSignatures, 125_000]]) {
+    if (SUPABASE_SERVICE_ROLE_KEY && collector.status().enabled) {
+      const tick = () => collector.run().catch(() => {});
+      setTimeout(tick, delay);
+      setInterval(tick, collector.status().interval_ms).unref?.();
+    }
+  }
   startTokenDiscoveryScheduler();
   if (SUPABASE_SERVICE_ROLE_KEY && solanaDetails.status().enabled) {
     const tick = () => solanaDetails.run().catch(() => {});
@@ -293,9 +310,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, token_discovery_enabled: tokenDiscoveryStatus().enabled, solana_details_enabled: solanaDetails.status().enabled, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
+      return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, started_at: startedAt, now: new Date().toISOString(), scheduler: { dexscreener_enabled: ENABLE_DEXSCREENER_INGEST, jupiter_enabled: ENABLE_JUPITER_INGEST, solana_rpc_enabled: ENABLE_SOLANA_RPC_INGEST, rugcheck_enabled: ENABLE_RUGCHECK_INGEST, token_discovery_enabled: tokenDiscoveryStatus().enabled, solana_details_enabled: solanaDetails.status().enabled, promoted_market_enabled: promotedMarket.status().enabled, promoted_signatures_enabled: promotedSignatures.status().enabled, jupiter_token_enrichment_enabled: ENABLE_JUPITER_TOKEN_ENRICHMENT, service_role_configured: Boolean(SUPABASE_SERVICE_ROLE_KEY) } });
     }
     if (req.method === "GET" && url.pathname === "/status") return sendJson(res, 200, { service: "arian-terminal-worker", status: "ok", version, scheduler: schedulerStatus(), now: new Date().toISOString() });
+    if (req.method === "GET" && url.pathname === "/probe/promoted-market") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await promotedMarket.probe()) });
+    if (req.method === "GET" && url.pathname === "/probe/promoted-signatures") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await promotedSignatures.probe()) });
     if (req.method === "GET" && url.pathname === "/probe/jupiter-token-enrichment") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await probeJupiterTokenEnrichment()) });
     if (req.method === "GET" && url.pathname === "/probe/token-discovery") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await runTokenDiscovery({ write: false })) });
     if (req.method === "GET" && url.pathname === "/probe/solana-details") return sendJson(res, 200, { service: "arian-terminal-worker", version, ...(await solanaDetails.probe()) });

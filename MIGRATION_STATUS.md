@@ -1,65 +1,68 @@
 # Collector migration status
 
-Audit started 2026-10-01 UTC. Initial GitHub HEAD: `909b489`; package 0.8.0, HTTP API 0.7.0.
-Worker 0.8.1 committed/published (code commit `50421c0`) aligns versions and adds discovery/detail/enrichment probes and discovery/detail status.
-Production project: `ctikvqtvzoaqqgnxqbgu`. No paid services, history deletion, RLS changes, or scoring-weight changes.
+Project `ctikvqtvzoaqqgnxqbgu`; repository name remains `arian-terminal-worke`.
+Live worker: **0.8.1** (startup 2026-10-01 06:29:50 UTC). Prepared next worker: **0.9.0**.
+All historical functions/jobs remain available. No retention, table drops, RLS relaxations, or scoring-weight changes.
 
-| Collector | Legacy cron IDs | Worker version | External RPC | Status / last verification | Rollback |
+| Collector | Legacy cron IDs | Worker | External RPC | Status / last verification | Rollback |
 |---|---|---|---|---|---|
-| Canonical DexScreener | 1,2 | live API 0.7.0 | arian_external_ingest_dexscreener_v1 | Success, 0 errors, normalized snapshot at 05:33 UTC; legacy inactive | Stop worker collector, enable 1,2 |
-| Jupiter quote | 3,4 | live API 0.7.0 | arian_external_ingest_jupiter_v1 | Success, 0 errors at 05:33 UTC; legacy inactive | Stop worker collector, enable 3,4 |
-| Solana signatures | 5 | live API 0.7.0 | arian_external_ingest_solana_signatures_v1 | Success, 3 transactions at 05:33 UTC; legacy inactive | Stop signature collector, enable 5 |
-| Solana details / Raydium detection | 6 | 0.8.1 on GitHub, deploy pending | arian_external_claim_solana_transaction_details_v1 / arian_external_ingest_solana_transaction_detail_v1 | Gap confirmed; job 6 re-enabled at ~05:34 UTC; 2 details finalized at 05:35. New RPCs installed; external verification pending | Set ENABLE_SOLANA_DETAILS_INGEST=false; restore job 6 command to SELECT public.arian_run_solana_transaction_worker(); and active=true |
-| RugCheck canonical SOL | 9,10 | live API 0.7.0 | arian_external_ingest_rugcheck_v1 | Canonical external success at 05:29 UTC. Job 9 inactive; DB-only job 10 restored ~05:49 for discovered-risk requests | Stop canonical worker collector, enable 9; keep DB finalizer 10 active while 18 enqueues |
-| Token discovery | 12,13 | 0.8.1 on GitHub, deploy pending | arian_external_ingest_token_discovery_v1 | Existing external successful writes observed; legacy remains active pending full probes/status verification | Stop discovery collector, enable 12,13 |
-| Jupiter token enrichment | 16,17 | 0.8.1 on GitHub, deploy pending | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Existing external successful writes; claim row locking and failure release installed; legacy active pending verification | Stop enrichment collector, enable 16,17 |
+| Canonical DexScreener | 1,2 | 0.8.1 | arian_external_ingest_dexscreener_v1 | Migrated; snapshot success 06:34 UTC, legacy inactive | Stop collector; enable 1,2 |
+| Jupiter quote | 3,4 | 0.8.1 | arian_external_ingest_jupiter_v1 | Migrated; 06:30 delivery timeout had committed successfully; next 06:34 scheduler success, legacy inactive | Stop collector; enable 3,4 |
+| Canonical Solana signatures | 5 | 0.8.1 | arian_external_ingest_solana_signatures_v1 | Migrated; 3 new signatures at 06:34 UTC, legacy inactive | Stop collector; enable 5 |
+| Solana details | 6 (mixed job split) | 0.8.1 | arian_external_claim_solana_transaction_details_v1 / arian_external_ingest_solana_transaction_detail_v1 | Two distinct successful cycles 06:31 and 06:34; 4 raw details, 0 errors. HTTP cutover ~06:38 UTC; job 6 active with DB-only command | Set ENABLE_SOLANA_DETAILS_INGEST=false; restore job 6 command SELECT public.arian_run_solana_transaction_worker(); active=true |
+| Canonical RugCheck SOL | 9 | 0.8.1 | arian_external_ingest_rugcheck_v1 | Migrated; external assessment success 06:30 UTC, job 9 inactive | Stop canonical collector; enable 9 |
+| Discovered-token RugCheck finalizer | 10 (job 18 still enqueues HTTP) | DB-local | Existing arian_run_rugcheck_worker | Kept active: disabling it had stranded discovered-token assessments; two recovered at 05:48 UTC | Keep 10 active while 18 still enqueues |
+| Token Discovery | 12,13 | 0.8.1 | arian_external_ingest_token_discovery_v1 | Two cycles 06:31/06:39 successful, each 2 raw records; latter created 3 instances/events/scores. Job 12 disabled ~06:41; legacy drained, then 13 disabled | Set ENABLE_TOKEN_DISCOVERY=false; enable 12,13 |
+| Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
+| Promoted market snapshots | 20 HTTP/selection; 21 DB-local | Prepared 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Secure RPCs installed; same legacy normalization/scoring preserved. Live Blitz verification pending. Both old jobs active | Stop new collector; ensure 20,21 active |
+| Promoted pool signatures | 23 HTTP/selection; 24 DB-local | Prepared 0.9.0 | arian_external_claim_promoted_signatures_v1 / arian_external_peek_promoted_signatures_v1 / arian_external_ingest_promoted_signatures_v1 | Secure RPCs installed; same transaction metadata/upsert preserved. Live Blitz verification pending. Both old jobs active | Stop new collector; ensure 23,24 active |
 
-Cutover rule: verify live probes write=false, two scheduled successes with transport=blitz_worker/error_count=0 and expected raw/normalized rows, then alter legacy active=false. Never delete jobs.
+## Production cutover evidence
 
-Solana job 6 cutover will keep it **active** and change its command to
-`SELECT public.arian_run_solana_local_processing_v1();` only after external details succeed.
-That function drains legacy responses and detects canonical swaps without enqueueing HTTP.
-Existing job 26 retains PumpSwap detection. Old worker function remains intact for rollback.
-Claims exclude pg_net requests and processed rows; expired leases are reclaimable. Ingest locks the transaction/run and repeated delivery cannot duplicate detail raw events.
+0.8.1 `/health` and `/status`: 200. Discovery, enrichment and detail probes: 200/success/writes_to_supabase=false.
+External run IDs: details 13104/13105 (one cycle), 13112/13113 (second cycle);
+enrichment 13102 and 13111; discovery 13103 and 13120.
+All successful with error_count=0 and transport=blitz_worker.
+Raw/normalized records checked directly; discovery 13120 had 3 instances, 3 discovery events and 3 scores.
+Job 6 command is now `SELECT public.arian_run_solana_local_processing_v1();`.
+It drains old detail responses and runs canonical swap detection without enqueueing HTTP.
+Job 26 retains PumpSwap detection; job 10 retains discovered-risk finalization.
+Old discovery requests were drained before job 13 was disabled.
 
-## Remaining candidate classification
+## Next deployment and verification
 
-| Jobs | Class | Action |
-|---|---|---|
-| 18 discovered risk enqueue | Mixed: DB target selection calls RugCheck HTTP enqueue | Split selection/fetch; restored job 10 finalized 2 stalled requests successfully |
-| 19 promotion | DB-local compute/storage | Keep in Supabase |
-| 20 promoted market enqueue | Mixed: DB selection + DexScreener HTTP | Candidate for external fetch |
-| 21 promoted market worker | DB-local response handling + normalization; no HTTP calls | Keep in Supabase |
-| 23 promoted signatures enqueue | Mixed: DB selection + Solana HTTP | Candidate for external fetch |
-| 24 promoted signature worker | DB-local response handling + transaction storage; no HTTP calls | Keep in Supabase |
-| 30 X mirror enqueue | Mixed: DB selection + free mirror HTTP | Inspect source health before replacement |
-| 31 X mirror worker | DB-local response handling + scoring; no HTTP calls | Keep in Supabase |
-| 32 X profile enqueue | Mixed: DB selection calls profile HTTP helper | Inspect source health before replacement |
-| 33 X profile worker | DB-local response handling + scoring; no HTTP calls | Keep in Supabase |
+Build latest main in Blitz for 0.9.0. No deployment API available in this session.
+New collectors automatically run a read-only provider probe before claiming work, then poll one selected pool every 5 minutes.
+Public probes: `/probe/promoted-market`, `/probe/promoted-signatures`; status includes both collectors.
+Workspace DexScreener provider request returned HTTP 403: source reachability must be verified from Blitz before cutover.
+Legacy 20/21/23/24 remain active. Confirm two independent scheduled successes, error_count=0,
+raw event plus normalized snapshot/transactions and downstream freshness before disabling HTTP jobs 20/23.
+Keep DB-local workers 21/24 while draining legacy responses; they contain no external HTTP calls.
+Claims serialize on the connector, respect outstanding legacy runs, and expire abandoned runs after 10 minutes.
+Ingest locks run ID; repeated delivery creates no duplicate evidence/snapshots. Provider failures release the run.
+No scoring logic moved to Node. DB success/idempotence/failure tests use rolled-back transactions; they are not Blitz success evidence.
+RPC ACLs verified: SECURITY DEFINER/search_path=pg_catalog; no anon/authenticated execute; service_role enabled.
+Security advisor reported only existing informational RLS-without-policy findings; restrictive RLS retained.
 
-2026-10-01 ~05:36 UTC sizes (total relation bytes, rows from pg_stat estimates):
+## Remaining collector audit
+
+18: mixed DB selection plus RugCheck HTTP; split next, keep 10 finalizing.
+19: DB-local promotion, keep in Supabase.
+30: mixed DB target selection plus free FxTwitter HTTP; 31: DB-local response handling/scoring.
+32: mixed DB selection plus profile HTTP; 33: DB-local response handling/scoring.
+X mirror has recent successes and failures; source stability must be proven before any legacy cutover.
+
+## Storage baseline / recovery history
+
+2026-10-01 ~05:36 UTC total relation bytes / estimated rows:
 asset_feature_snapshots 278,233,088 / 116,497; wallet_feature_snapshots 135,921,664 / 194,028;
 raw_events 131,760,128 / 20,236; ingestion_runs 10,428,416 / 12,981;
 blockchain_transactions 10,125,312 / 7,357; cron.job_run_details 27,983,872.
-No retention performed. No measured IO/CPU reduction claimed yet.
+No measured IO/CPU reduction claimed; history size is a separate retention phase requiring explicit approval.
+Original disabled-job-6 gap was recovered at ~05:34; 16 detail records and new swaps advanced to 05:51 before external cutover.
+Full production audit dump stays outside the repository. Published SQL contains only the targeted authorized RPC definitions.
 
-## Verification and deployment blocker (~05:50 UTC)
-
-Blitz `/health` and `/status` both return HTTP 200, but still expose 0.7.0 and the same 05:28 startup time.
-GitHub has no Actions runs, check runs or deployments for this repository; no Blitz deployment API/credentials are available in the session.
-A manual Blitz deployment of the latest `main` is required before live 0.8.1 probes/cutovers.
-Jobs 12/13/16/17 remain active. External discovery success at 05:38, enrichment success at 05:43 (0 errors); replacement verification remains pending.
-Solana fallback detail records advanced at 05:36/05:39/05:42, and job 6 retains detection.
-Do not label new Solana external RPC test records as real Blitz writes: success/idempotence and null-failure checks ran inside rolled-back transactions.
-RPC ACLs verified: SECURITY DEFINER/search_path=pg_catalog, anon/authenticated cannot execute, service_role can execute.
-Security advisor returned informational RLS-without-policy findings only; existing restrictive RLS preserved.
-Provider audit: promoted market/signature collectors have recent successful runs; X mirror has both successes and failures and requires source stability checks before offload.
-The full production-function audit is stored outside the repository and is not published.
-Automatic approval initially rejected a push due to suspected audit disclosure; committed tree and credential scan proved the audit absent, and publishing was subsequently allowed.
-
-Final session freshness check at 05:52 UTC: 16 detail raw events recovered since 05:34;
-latest transaction detail **and swap** at 05:51 UTC. Jobs 6,10,26 have recent succeeded executions.
-Detail states: 6,513 processed, 2 pending, 851 unclaimed. Backlog remains and throughput should be measured after deployment.
-Worker code published at `d98aaa4`; local startup `/health` and `/status` return 200/version 0.8.1.
-Six Node tests passed; database success/idempotence/null-release checks passed and were rolled back.
-Blitz still reports 0.7.0; external Solana scheduled-write verification and collector cutovers are pending manual deployment.
+Post-cutover check 2026-10-01 06:48 UTC: jobs 12/13/16/17 inactive, job 6 DB-only active;
+external details/enrichment succeeded at 06:39 and 06:44 with zero errors; latest swap at 06:45.
+Live 0.8.1 health/status healthy. New 0.9.0 local health/status both 200, seven new collector tests passed.
+Rolled-back SQL verified market/signature ingestion idempotence and signature failure release.

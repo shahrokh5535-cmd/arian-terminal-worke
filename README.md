@@ -5,7 +5,8 @@ Database normalization, scoring, fusion and swap detection stay in Supabase. See
 
 `/health` and `/status` expose safe operational summaries. Read-only shadow probes:
 `/probe/dexscreener`, `/probe/jupiter`, `/probe/solana-rpc`, `/probe/rugcheck`,
-`/probe/token-discovery`, `/probe/jupiter-token-enrichment`, `/probe/solana-details`.
+`/probe/token-discovery`, `/probe/jupiter-token-enrichment`, `/probe/solana-details`,
+`/probe/promoted-market`, `/probe/promoted-signatures`.
 Probes never claim work or write to Supabase.
 
 Secrets belong only in Blitz environment variables. Never commit `.env` or service-role keys.
@@ -18,3 +19,9 @@ Verify external scheduled writes and downstream freshness before disabling any l
 Job 6 must continue DB-local swap detection after its HTTP work is offloaded.
 
 Validation: `node --check src/server.js`, `npm test`.
+
+Promoted market/signature collectors in v0.9.0 respect `ENABLE_PROMOTED_MARKET_INGEST` and
+`ENABLE_PROMOTED_SIGNATURES_INGEST` (both default true when credentials are configured).
+Each performs a read-only shadow probe before its first claim. Selection uses the existing DB policy.
+An outstanding legacy run causes the external scheduler to wait; legacy jobs remain active until real writes are verified.
+Runs are locked, ingestion is idempotent by run ID, and a lost delivery can be retried once safely.
