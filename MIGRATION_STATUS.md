@@ -1,6 +1,7 @@
 # Collector migration status
 
 Project `ctikvqtvzoaqqgnxqbgu`; repository name remains `arian-terminal-worke`.
+Prepared worker: **0.11.0**, awaiting manual Blitz build.
 Live worker: **0.10.0** (startup 2026-10-01 12:23:58 UTC).
 All historical functions/jobs remain available. No retention, table drops, RLS relaxations, or scoring-weight changes.
 
@@ -17,6 +18,8 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
 | Promoted market snapshots | 20 HTTP/selection; 21 DB-local | 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Two cycles 11:26/11:29 successful, snapshots 3782/3785 and raw events verified, error_count=0. Job 20 disabled 11:33:24 UTC; DB-only 21 active | Stop new collector; ensure 20,21 active |
 | Promoted pool signatures | 23 HTTP/selection; 24 DB-local | 0.9.0 | arian_external_claim_promoted_signatures_v1 / arian_external_peek_promoted_signatures_v1 / arian_external_ingest_promoted_signatures_v1 | Two cycles 11:26/11:29 successful, 3 signatures matched normalized transactions per batch, error_count=0. Job 23 disabled 11:33:24 UTC; DB-only 24 active | Stop new collector; ensure 23,24 active |
+| X linked public posts | 30 mixed; 31 DB-local | 0.11.0 prepared | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | RPCs applied; tests passed. Await Blitz probe and real scheduled writes. 30/31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
+| X profile timelines | 32 mixed; 33 DB-local | legacy | Existing functions | Source endpoint returns 404; no cutover or replacement claimed | Keep 32/33 available |
 
 ## Production cutover evidence
 
@@ -146,3 +149,30 @@ Latest verified success: 2026-10-01 12:41 UTC, content 912 / raw event 21221.
 This is collection of discovery-linked public posts, not broad X search or complete timelines.
 No official API key, account cookies, paid API, scoring changes, or cron cutover added.
 Jobs 30/31/32/33 remain available and active while replacement scope is evaluated.
+
+## Linked X public-post preparation (2026-10-01 ~13:20 UTC)
+
+Current GitHub HEAD was inspected before edits: 0fbe270; deployed worker is 0.10.0.
+Only job 30 external HTTP is prepared for offload; job 31 DB-local and jobs 32/33 remain active.
+The three new RPCs are SECURITY DEFINER/search_path=pg_catalog;
+PUBLIC/anon/authenticated revoked, service_role/postgres granted and verified.
+Target selection preserves discovery-link provenance and promotion-hold filtering,
+uses explicit x.com/twitter.com domain matching, excludes ingested posts/pending claims,
+and adds per-post retry_after for failed external requests. Connector row lock serializes claims.
+One request per ten-minute cycle; abandoned external claims expire after ten minutes.
+External ingestion preserves the original finalizer's normalization, influencer/content/mention
+upserts and social scoring/confidence policy. Payload ID must match the claimed post.
+Existing implicit link attribution is preserved; it is not proof of token endorsement or a wallet buy.
+Rolled-back SQL tests verified pending-claim exclusion, mismatched-ID rejection,
+one raw event on repeated ingestion, content mention presence, and six-hour 404 backoff.
+No synthetic external run was retained (confirmed external x_public_social run count = 0).
+Seven Node tests passed; full existing suite passed; local health/status 200/v0.11.0.
+Read-only workspace provider probe at 13:19:50: success, writes_to_supabase=false,
+post 2105638157492326666, author devilsiopf. Workspace Node uses the session proxy
+for this check; production still uses native fetch without added dependencies.
+Security advisor shows only existing informational RLS-without-policy findings:
+https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy
+No job 30 cutover, profile migration, paid API, or official X credentials added.
+After deployment: check /health,/status,/probe/x-social; verify two scheduled successful
+blitz_worker runs with zero errors, processed raw events, content and mention/scoring updates;
+then disable only job 30 and verify freshness. Keep job 31 for legacy drain/rollback.

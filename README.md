@@ -34,3 +34,15 @@ writing. Unsupported tokens receive a six-hour 404 backoff; 429 receives ten min
 SQL preserves existing safety-score semantics and assessment/storage logic.
 Job 18 was disabled after two actual Blitz batches and normalized assessments were verified.
 DB-only job 10 remains available; see MIGRATION_STATUS.md for rollback.
+
+Linked X public-post HTTP collection is prepared in v0.11.0. It uses
+`ENABLE_X_PUBLIC_SOCIAL_INGEST` (default true with credentials) and
+`X_PUBLIC_SOCIAL_INTERVAL_MS` (minimum/default 600000), claiming one post per cycle.
+`/probe/x-social` reads a previously ingested public post without claiming/writing.
+`db/x_public_social_external.sql` keeps normalization and existing social scoring in SQL.
+HTTP 404 backs off six hours; 429 fifteen minutes; other failures ten minutes.
+External claims serialize on the existing connector and wait for pending linked-post runs.
+Only job 30 is a cutover candidate after two verified real Blitz batches;
+DB-only job 31 and profile jobs 32/33 remain active.
+The collector follows discovery-linked posts; it does not provide broad search,
+complete account timelines, confirmed wallet buys, or proof that a linked post endorses a token.
