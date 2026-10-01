@@ -130,3 +130,19 @@ Post-cutover status 12:27:20: worker 0.10.0, scheduler enabled, last batch succe
 Rollback: set ENABLE_DISCOVERED_RISK_INGEST=false, then
 SELECT cron.alter_job(18, active := true); keep job 10 active.
 No rebuild is needed for this documentation-only update.
+
+## X connection audit (2026-10-01 ~12:42 UTC)
+
+User requested checking free X news collection before obtaining an official API key.
+A read-only request to https://api.fxtwitter.com/status/2105630940537983114
+returned HTTP 200, code=200, matching tweet ID and nonempty text.
+The existing profile timeline request for peeledstickers returned HTTP 404.
+This confirms individual public post retrieval works, but profile timeline retrieval
+is unresolved; account login alone does not supply an API integration.
+Seven linked-token post ingestions succeeded in the sampled three hours.
+Production runs 13697/13730/13763 were joined to processed raw events,
+content_items with nonempty text, and token content_mentions.
+Latest verified success: 2026-10-01 12:41 UTC, content 912 / raw event 21221.
+This is collection of discovery-linked public posts, not broad X search or complete timelines.
+No official API key, account cookies, paid API, scoring changes, or cron cutover added.
+Jobs 30/31/32/33 remain available and active while replacement scope is evaluated.
