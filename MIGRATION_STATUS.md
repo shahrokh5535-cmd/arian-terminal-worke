@@ -1,8 +1,7 @@
 # Collector migration status
 
 Project `ctikvqtvzoaqqgnxqbgu`; repository name remains `arian-terminal-worke`.
-Prepared worker: **0.11.0**, awaiting manual Blitz build.
-Live worker: **0.10.0** (startup 2026-10-01 12:23:58 UTC).
+Live worker: **0.11.0** (startup 2026-10-01 13:27:49 UTC).
 All historical functions/jobs remain available. No retention, table drops, RLS relaxations, or scoring-weight changes.
 
 | Collector | Legacy cron IDs | Worker | External RPC | Status / last verification | Rollback |
@@ -18,7 +17,7 @@ All historical functions/jobs remain available. No retention, table drops, RLS r
 | Jupiter Token Enrichment | 16,17 | 0.8.1 | arian_external_claim_jupiter_token_enrichment_v1 / arian_external_ingest_jupiter_token_enrichment_v1 | Two cycles 06:30/06:34, 0 errors, 2 raw records each, decimals/metadata/route updated. Both jobs disabled ~06:38 UTC | Set ENABLE_JUPITER_TOKEN_ENRICHMENT=false; enable 16,17 |
 | Promoted market snapshots | 20 HTTP/selection; 21 DB-local | 0.9.0 | arian_external_claim_promoted_market_v1 / arian_external_peek_promoted_market_v1 / arian_external_ingest_promoted_market_v1 | Two cycles 11:26/11:29 successful, snapshots 3782/3785 and raw events verified, error_count=0. Job 20 disabled 11:33:24 UTC; DB-only 21 active | Stop new collector; ensure 20,21 active |
 | Promoted pool signatures | 23 HTTP/selection; 24 DB-local | 0.9.0 | arian_external_claim_promoted_signatures_v1 / arian_external_peek_promoted_signatures_v1 / arian_external_ingest_promoted_signatures_v1 | Two cycles 11:26/11:29 successful, 3 signatures matched normalized transactions per batch, error_count=0. Job 23 disabled 11:33:24 UTC; DB-only 24 active | Stop new collector; ensure 23,24 active |
-| X linked public posts | 30 mixed; 31 DB-local | 0.11.0 prepared | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | RPCs applied; tests passed. Await Blitz probe and real scheduled writes. 30/31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
+| X linked public posts | 30 mixed; 31 DB-local | 0.11.0 | arian_external_peek_x_public_social_v1 / arian_external_claim_x_public_social_v1 / arian_external_ingest_x_public_social_v1 | Deployed; probe success, first real scheduler run 13958 at 13:57 UTC verified. Await second cycle; 30/31 active | Set ENABLE_X_PUBLIC_SOCIAL_INGEST=false; ensure 30/31 active |
 | X profile timelines | 32 mixed; 33 DB-local | legacy | Existing functions | Source endpoint returns 404; no cutover or replacement claimed | Keep 32/33 available |
 
 ## Production cutover evidence
@@ -176,3 +175,21 @@ No job 30 cutover, profile migration, paid API, or official X credentials added.
 After deployment: check /health,/status,/probe/x-social; verify two scheduled successful
 blitz_worker runs with zero errors, processed raw events, content and mention/scoring updates;
 then disable only job 30 and verify freshness. Keep job 31 for legacy drain/rollback.
+
+## X shadow-scheduler overlap repair (2026-10-01 13:57 UTC)
+
+Live 0.11.0 health/status and /probe/x-social: HTTP 200; probe success and no writes.
+The deployed scheduler initially idled because each legacy HTTP request had returned,
+but job 31 finalized it after the external timer's ten-minute slot.
+Claim RPC now drains at most one already-returned legacy linked-post response using
+the existing DB-only finalizer, before taking the connector lock. Run locks use SKIP LOCKED;
+lock order remains run then connector. Unresolved requests still block claims.
+No HTTP enqueue, cron disable or Node change was required for this SQL correction.
+Prepared SQL file updated; claim SECURITY DEFINER/search_path/ACL verified again.
+Rolled-back SQL exercised duplicate-claim exclusion and failure release.
+First actual Blitz run 13958 at 13:57:51: success/error_count=0, fetched/inserted=1.
+Raw event 21426 processed, content 923 has text, token mention exists, DB social score
+48.25/confidence 65.75 and last-source evidence updated. Existing attribution/scoring preserved.
+Job 30 remains active until a second successful scheduler cycle is verified.
+Rollback of this shadow drain alone: remove the pre-lock legacy drain block from the
+claim RPC; original guard then returns pending_linked_post until job 31 processes it.

@@ -17,8 +17,25 @@ CREATE OR REPLACE FUNCTION public.arian_external_claim_x_public_social_v1()
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE
  v_connector_id bigint; v_source_id bigint; v_run_id bigint; v_event_id bigint; v_asset_id bigint;
- v_instance_id bigint; v_chain_id bigint; v_url text; v_tweet_id text;
+ v_instance_id bigint; v_chain_id bigint; v_url text; v_tweet_id text; v_legacy record;
 BEGIN
+ -- During shadow operation, consume an already-returned legacy response before
+ -- taking the connector lock. This preserves the finalizer's run->connector lock order.
+ -- No HTTP is enqueued here; unresolved legacy requests continue to block claiming.
+ SELECT c.id INTO v_connector_id FROM public.connectors c
+ WHERE c.connector_key='x_public_mirror_fxtwitter' AND c.is_enabled LIMIT 1;
+ IF NOT FOUND THEN RAISE EXCEPTION 'X mirror connector unavailable'; END IF;
+ FOR v_legacy IN
+  SELECT ir.id FROM public.ingestion_runs ir
+  WHERE ir.connector_id=v_connector_id AND ir.status='running'
+   AND ir.metadata_json->>'dataset'='linked_token_social_post'
+   AND ir.metadata_json->>'transport' IS DISTINCT FROM 'blitz_worker'
+   AND EXISTS(SELECT 1 FROM net._http_response response
+     WHERE response.id=(ir.metadata_json->>'http_request_id')::bigint)
+  ORDER BY ir.started_at LIMIT 1 FOR UPDATE OF ir SKIP LOCKED
+ LOOP
+  PERFORM public.arian_finalize_x_public_social_ingestion(v_legacy.id);
+ END LOOP;
  SELECT c.id,c.source_id INTO v_connector_id,v_source_id FROM public.connectors c
  WHERE c.connector_key='x_public_mirror_fxtwitter' AND c.is_enabled
  LIMIT 1 FOR UPDATE;
