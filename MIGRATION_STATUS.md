@@ -66,3 +66,9 @@ Post-cutover check 2026-10-01 06:48 UTC: jobs 12/13/16/17 inactive, job 6 DB-onl
 external details/enrichment succeeded at 06:39 and 06:44 with zero errors; latest swap at 06:45.
 Live 0.8.1 health/status healthy. New 0.9.0 local health/status both 200, seven new collector tests passed.
 Rolled-back SQL verified market/signature ingestion idempotence and signature failure release.
+
+06:50 verification: external discovery 13145 created 3 further records after legacy disable;
+enrichment 13146 and details 13147/13148 succeeded, error_count=0.
+One legacy Jupiter request (13116) had started at 06:38 just before cutover;
+manually drained both token/route stages successfully at ~06:51 without re-enabling enqueue cron.
+Prepared 0.9.0 code published in commit d48f41e; production 20/21/23/24 remain active pending Blitz deployment.
