@@ -7,7 +7,7 @@ function setup(kind, { mismatch = false, lostDelivery = false, apiError = false 
   const calls = [];
   let fetched = 0, delivered = 0;
   const target = { pair_address: address, pool_address: address };
-  const worker = createPromotedCollector({ kind, enabled: true, log: () => {},
+  const worker = createPromotedCollector({ kind, enabled: true, batchSize: 1, log: () => {},
     rpc: async (name, body) => {
       calls.push({ name, body });
       if (name.includes("peek")) return { status: "ready", ...target };
@@ -54,4 +54,28 @@ test("market rejects mismatched pair identity before claiming any work", async (
   const { worker, calls } = setup("market", { mismatch: true });
   await assert.rejects(worker.run(), /identity mismatch/);
   assert.equal(calls.some(x => x.name.includes("claim")), false);
+});
+
+test("market default batch processes three promoted targets sequentially", async () => {
+  const calls = [];
+  let nextRun = 1;
+  const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
+    rpc: async (name, body) => {
+      calls.push({ name, body });
+      if (name.includes("peek")) return { status: "ready", pair_address: address };
+      if (name.includes("claim")) return { status: "claimed", run_id: nextRun++, pair_address: address };
+      return { status: "success", run_id: body.p_run_id };
+    },
+    fetchJson: async () => ({ response: { ok: true }, payload: {
+      pairs: [{ pairAddress: address, chainId: "solana", dexId: "pumpswap", priceUsd: "1" }]
+    } })
+  });
+
+  const result = await worker.run();
+  assert.equal(result.status, "success");
+  assert.equal(result.batch_size, 3);
+  assert.equal(result.targets_processed, 3);
+  assert.equal(calls.filter(x => x.name.includes("claim")).length, 3);
+  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 3);
+  assert.equal(worker.status().batch_size, 3);
 });
