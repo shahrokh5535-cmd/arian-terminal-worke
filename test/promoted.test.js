@@ -56,7 +56,7 @@ test("market rejects mismatched pair identity before claiming any work", async (
   assert.equal(calls.some(x => x.name.includes("claim")), false);
 });
 
-test("market default batch processes three promoted targets sequentially", async () => {
+test("market default batch processes ten promoted targets sequentially", async () => {
   const calls = [];
   let nextRun = 1;
   const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
@@ -73,9 +73,9 @@ test("market default batch processes three promoted targets sequentially", async
 
   const result = await worker.run();
   assert.equal(result.status, "success");
-  assert.equal(result.batch_size, 3);
-  assert.equal(result.targets_processed, 3);
-  assert.equal(calls.filter(x => x.name.includes("claim")).length, 3);
-  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 3);
-  assert.equal(worker.status().batch_size, 3);
+  assert.equal(result.batch_size, 10);
+  assert.equal(result.targets_processed, 10);
+  assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
+  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
+  assert.equal(worker.status().batch_size, 10);
 });
