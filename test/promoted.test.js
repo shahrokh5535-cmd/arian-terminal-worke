@@ -41,9 +41,11 @@ for (const kind of ["market", "signatures"]) {
     assert.deepEqual(deliveries[0].body, deliveries[1].body);
     assert.equal(worker.status().running, false);
   });
-  test(`${kind} provider failure releases a claimed run`, async () => {
+  test(`${kind} provider failure releases a claimed run without wedging the scheduler`, async () => {
     const { worker, calls } = setup(kind, { apiError: true });
-    await assert.rejects(worker.run(), /429/);
+    const result = await worker.run();
+    assert.equal(result.status, "error");
+    assert.equal(result.failed_targets, 1);
     const release = calls.find(x => x.body?.p_error);
     assert.equal(release.body.p_run_id, 123);
     assert.equal(release.body.p_payload, null);
@@ -75,7 +77,42 @@ test("market default batch processes ten promoted targets sequentially", async (
   assert.equal(result.status, "success");
   assert.equal(result.batch_size, 10);
   assert.equal(result.targets_processed, 10);
+  assert.equal(result.successful_targets, 10);
+  assert.equal(result.failed_targets, 0);
   assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
   assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
   assert.equal(worker.status().batch_size, 10);
+});
+
+test("market batch continues after one claimed target fails identity validation", async () => {
+  const calls = [];
+  let nextRun = 1;
+  let claimCount = 0;
+  const badAddress = "B".repeat(32);
+  const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
+    rpc: async (name, body) => {
+      calls.push({ name, body });
+      if (name.includes("peek")) return { status: "ready", pair_address: address };
+      if (name.includes("claim")) {
+        claimCount++;
+        return { status: "claimed", run_id: nextRun++, pair_address: claimCount === 1 ? badAddress : address };
+      }
+      return { status: body.p_error ? "failed" : "success", run_id: body.p_run_id };
+    },
+    fetchJson: async (url) => {
+      const requested = url.split('/').at(-1);
+      return { response: { ok: true }, payload: {
+        pairs: [{ pairAddress: requested === badAddress ? address : requested, chainId: "solana", dexId: "pumpswap", priceUsd: "1" }]
+      } };
+    }
+  });
+
+  const result = await worker.run();
+  assert.equal(result.status, "success");
+  assert.equal(result.targets_processed, 10);
+  assert.equal(result.successful_targets, 9);
+  assert.equal(result.failed_targets, 1);
+  assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
+  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
+  assert.equal(calls.filter(x => x.body?.p_error).length, 1);
 });

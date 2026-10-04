@@ -50,6 +50,8 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
     const startedAt = new Date().toISOString();
     let claim = null, writes = false;
     const items = [];
+    const failures = [];
+    let attempted = 0;
     try {
       if (!probePassed) {
         const shadow = await probe();
@@ -65,38 +67,53 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
         claim = await rpc(claimRpc, {});
         if (claim?.status === "idle") break;
         if (claim?.status !== "claimed" || !claim.run_id) throw new Error("Invalid promoted claim response");
+        attempted++;
 
-        const result = await collect(claim);
-        const body = { p_run_id: claim.run_id, p_payload: result.payload, p_error: null };
-        let db;
-        try { db = await rpc(ingestRpc, body, 45_000); }
-        catch (e) {
-          if (!/timeout|aborted|fetch failed/i.test(e.message)) throw e;
-          // The run ID is an idempotency key. Retry only a lost/timeout delivery once.
-          db = await rpc(ingestRpc, body, 45_000);
+        try {
+          const result = await collect(claim);
+          const body = { p_run_id: claim.run_id, p_payload: result.payload, p_error: null };
+          let db;
+          try { db = await rpc(ingestRpc, body, 45_000); }
+          catch (e) {
+            if (!/timeout|aborted|fetch failed/i.test(e.message)) throw e;
+            // The run ID is an idempotency key. Retry only a lost/timeout delivery once.
+            db = await rpc(ingestRpc, body, 45_000);
+          }
+          if (db?.status !== "success") throw new Error("Promoted ingestion did not succeed");
+          items.push({ run_id: claim.run_id, ...result.summary, database_result: db });
+        } catch (e) {
+          let db = null;
+          try {
+            db = await rpc(ingestRpc, { p_run_id: claim.run_id, p_payload: null, p_error: "External HTTP collection failed" });
+          } catch {}
+          failures.push({ run_id: claim.run_id, error: e instanceof Error ? e.message : "unknown_error", database_result: db });
+        } finally {
+          claim = null;
         }
-        if (db?.status !== "success") throw new Error("Promoted ingestion did not succeed");
-        items.push({ run_id: claim.run_id, ...result.summary, database_result: db });
-        claim = null;
       }
 
-      if (items.length === 0) {
+      if (attempted === 0) {
         lastRun = { status: "idle", mode: "external_ingest", writes_to_supabase: true, started_at: startedAt,
-          finished_at: new Date().toISOString(), reason: "no_target", batch_size: maxBatchSize, targets_processed: 0 };
+          finished_at: new Date().toISOString(), reason: "no_target", batch_size: maxBatchSize, targets_processed: 0,
+          successful_targets: 0, failed_targets: 0 };
         return lastRun;
       }
 
-      lastRun = { status: "success", mode: "external_ingest", provider: kind === "market" ? "dexscreener" : "solana_rpc",
+      const status = items.length > 0 ? "success" : "error";
+      lastRun = { status, mode: "external_ingest", provider: kind === "market" ? "dexscreener" : "solana_rpc",
         started_at: startedAt, finished_at: new Date().toISOString(), checked_at: new Date().toISOString(),
         latency_ms: Date.now() - Date.parse(startedAt), writes_to_supabase: true,
-        batch_size: maxBatchSize, targets_processed: items.length, items };
+        batch_size: maxBatchSize, targets_processed: attempted, successful_targets: items.length,
+        failed_targets: failures.length, items, failures,
+        ...(status === "error" ? { error: "Promoted batch failed" } : {}) };
       log(JSON.stringify({ event: `${name}_run`, ...lastRun }));
       return lastRun;
     } catch (e) {
       if (claim?.run_id) await rpc(ingestRpc, { p_run_id: claim.run_id, p_payload: null, p_error: "External HTTP collection failed" }).catch(() => {});
       lastRun = { status: "error", mode: "external_ingest", provider: kind === "market" ? "dexscreener" : "solana_rpc",
         started_at: startedAt, finished_at: new Date().toISOString(), writes_to_supabase: writes,
-        batch_size: maxBatchSize, targets_processed: items.length, error: e.message };
+        batch_size: maxBatchSize, targets_processed: attempted, successful_targets: items.length,
+        failed_targets: failures.length, error: e instanceof Error ? e.message : "unknown_error" };
       log(JSON.stringify({ event: `${name}_run`, ...lastRun }));
       throw e;
     } finally { running = false; }
