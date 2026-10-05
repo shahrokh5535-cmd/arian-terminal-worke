@@ -49,6 +49,7 @@ for (const kind of ["market", "signatures"]) {
     const release = calls.find(x => x.body?.p_error);
     assert.equal(release.body.p_run_id, 123);
     assert.equal(release.body.p_payload, null);
+    assert.equal(release.body.p_error, "External HTTP collection failed");
     assert.equal(worker.status().running, false);
   });
 }
@@ -114,5 +115,6 @@ test("market batch continues after one claimed target fails identity validation"
   assert.equal(result.failed_targets, 1);
   assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
   assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
-  assert.equal(calls.filter(x => x.body?.p_error).length, 1);
+  const failedDelivery = calls.find(x => x.body?.p_error);
+  assert.equal(failedDelivery.body.p_error, "Promoted DexScreener pair identity mismatch");
 });
