@@ -9,6 +9,12 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
   const peekRpc = `arian_external_peek_${name}_v1`;
   const maxBatchSize = Math.max(1, Math.min(Number(batchSize) || 1, 10));
 
+  function providerErrorForDatabase(error) {
+    const message = error instanceof Error ? error.message : "unknown_error";
+    if (kind === "market" && message === "Promoted DexScreener pair identity mismatch") return message;
+    return "External HTTP collection failed";
+  }
+
   async function collect(target) {
     const address = kind === "market" ? target.pair_address : target.pool_address;
     if (typeof address !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) throw new Error("Invalid promoted pool address");
@@ -84,7 +90,11 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
         } catch (e) {
           let db = null;
           try {
-            db = await rpc(ingestRpc, { p_run_id: claim.run_id, p_payload: null, p_error: "External HTTP collection failed" });
+            db = await rpc(ingestRpc, {
+              p_run_id: claim.run_id,
+              p_payload: null,
+              p_error: providerErrorForDatabase(e)
+            });
           } catch {}
           failures.push({ run_id: claim.run_id, error: e instanceof Error ? e.message : "unknown_error", database_result: db });
         } finally {
@@ -109,7 +119,13 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
       log(JSON.stringify({ event: `${name}_run`, ...lastRun }));
       return lastRun;
     } catch (e) {
-      if (claim?.run_id) await rpc(ingestRpc, { p_run_id: claim.run_id, p_payload: null, p_error: "External HTTP collection failed" }).catch(() => {});
+      if (claim?.run_id) {
+        await rpc(ingestRpc, {
+          p_run_id: claim.run_id,
+          p_payload: null,
+          p_error: providerErrorForDatabase(e)
+        }).catch(() => {});
+      }
       lastRun = { status: "error", mode: "external_ingest", provider: kind === "market" ? "dexscreener" : "solana_rpc",
         started_at: startedAt, finished_at: new Date().toISOString(), writes_to_supabase: writes,
         batch_size: maxBatchSize, targets_processed: attempted, successful_targets: items.length,
