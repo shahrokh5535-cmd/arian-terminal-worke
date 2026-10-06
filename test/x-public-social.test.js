@@ -99,3 +99,47 @@ test("default X social batch processes five posts sequentially", async () => {
   assert.equal(calls.filter(x => x.name.includes("ingest")).length, 5);
   assert.equal(worker.status().batch_size, 5);
 });
+
+
+test("transport timeout is classified without storing raw upstream errors", async () => {
+  const errors = [];
+  let count = 0;
+  const worker = createXPublicSocialCollector({
+    enabled: true, log: () => {}, batchSize: 1,
+    rpc: async (name, body) => {
+      if (name.includes("peek")) return { status: "ready", tweet_id: "123" };
+      if (name.includes("claim")) return { status: "claimed", run_id: 99, tweet_id: "123" };
+      if (body?.p_error) { errors.push(body.p_error); return { status: "failed" }; }
+      return { status: "success" };
+    },
+    fetchJson: async () => {
+      count++;
+      if (count === 1) return { response: { ok: true }, payload: { code: 200, tweet: { id: "123", text: "ok" } } };
+      throw new Error("network timed out: sensitive upstream trace");
+    }
+  });
+  await worker.run();
+  assert.deepEqual(errors, ["X_FETCH_TIMEOUT"]);
+});
+
+test("malformed upstream tweet is classified separately from 404", async () => {
+  const errors = [];
+  let count = 0;
+  const worker = createXPublicSocialCollector({
+    enabled: true, log: () => {}, batchSize: 1,
+    rpc: async (name, body) => {
+      if (name.includes("peek")) return { status: "ready", tweet_id: "123" };
+      if (name.includes("claim")) return { status: "claimed", run_id: 100, tweet_id: "123" };
+      if (body?.p_error) { errors.push(body.p_error); return { status: "failed" }; }
+      return { status: "success" };
+    },
+    fetchJson: async () => {
+      count++;
+      return count === 1
+        ? { response: { ok: true }, payload: { code: 200, tweet: { id: "123", text: "ok" } } }
+        : { response: { ok: true }, payload: { code: 200, tweet: { id: "999", text: "wrong id" } } };
+    }
+  });
+  await worker.run();
+  assert.deepEqual(errors, ["X_INVALID_PAYLOAD_OR_IDENTITY"]);
+});
