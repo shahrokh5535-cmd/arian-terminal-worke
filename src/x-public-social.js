@@ -9,14 +9,23 @@ export function createXPublicSocialCollector({ rpc, fetchJson, enabled, interval
 
   async function collect(tweetId) {
     if (typeof tweetId !== "string" || !/^[0-9]{1,25}$/.test(tweetId)) throw new Error("Invalid X post ID");
-    const { response, payload } = await fetchJson(`https://api.fxtwitter.com/status/${tweetId}`, {
-      headers: { Accept: "application/json", "User-Agent": "ArianTerminal/1.0" }
-    }, 10_000);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    let response, payload;
+    try {
+      ({ response, payload } = await fetchJson(`https://api.fxtwitter.com/status/${tweetId}`, {
+        headers: { Accept: "application/json", "User-Agent": "ArianTerminal/1.0" }
+      }, 10_000));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (/timeout|timed out|abort/i.test(detail) || error?.name === "TimeoutError" || error?.name === "AbortError") {
+        throw new Error("X_FETCH_TIMEOUT");
+      }
+      throw new Error("X_NETWORK_ERROR");
+    }
+    if (!response || !response.ok) throw new Error(Number.isInteger(response?.status) ? `HTTP ${response.status}` : "X_INVALID_RESPONSE");
     const tweet = payload?.tweet;
     if (String(payload?.code) !== "200" || !tweet || Array.isArray(tweet) || typeof tweet !== "object" ||
         tweet.id !== tweetId || typeof tweet.text !== "string" || !tweet.text.trim()) {
-      throw new Error("Invalid X post payload or identity");
+      throw new Error("X_INVALID_PAYLOAD_OR_IDENTITY");
     }
     return payload;
   }
@@ -48,7 +57,9 @@ export function createXPublicSocialCollector({ rpc, fetchJson, enabled, interval
   }
 
   async function releaseClaim(claim, error) {
-    const reason = /^HTTP \d{3}$/.test(error.message) ? error.message : "External X post collection failed";
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = /^(?:HTTP \\d{3}|X_FETCH_TIMEOUT|X_NETWORK_ERROR|X_INVALID_RESPONSE|X_INVALID_PAYLOAD_OR_IDENTITY)$/.test(message)
+      ? message : "External X post collection failed";
     let db = null;
     if (Number.isSafeInteger(claim?.run_id) && claim.run_id > 0) {
       try { db = await rpc(ingestRpc, { p_run_id: claim.run_id, p_payload: null, p_error: reason }); } catch {}
