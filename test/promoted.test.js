@@ -59,10 +59,10 @@ test("market rejects mismatched pair identity before claiming any work", async (
   assert.equal(calls.some(x => x.name.includes("claim")), false);
 });
 
-test("market default batch processes twenty promoted targets sequentially", async () => {
+test("market explicitly configured 20-target batch processes sequentially", async () => {
   const calls = [];
   let nextRun = 1;
-  const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
+  const worker = createPromotedCollector({ kind: "market", enabled: true, batchSize: 20, log: () => {},
     rpc: async (name, body) => {
       calls.push({ name, body });
       if (name.includes("peek")) return { status: "ready", pair_address: address };
@@ -90,7 +90,7 @@ test("market batch continues after one claimed target fails identity validation"
   let nextRun = 1;
   let claimCount = 0;
   const badAddress = "B".repeat(32);
-  const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
+  const worker = createPromotedCollector({ kind: "market", enabled: true, batchSize: 20, log: () => {},
     rpc: async (name, body) => {
       calls.push({ name, body });
       if (name.includes("peek")) return { status: "ready", pair_address: address };
@@ -125,6 +125,7 @@ test("promoted market supports a bounded canary and rollback batch size", () => 
     fetchJson: async () => { throw new Error("unexpected network call"); },
     log: () => {}
   });
+  assert.equal(make("market", undefined).status().batch_size, 10); // Safe default: no canary bypass.
   assert.equal(make("market", 10).status().batch_size, 10);
   assert.equal(make("market", 15).status().batch_size, 15);
   assert.equal(make("market", 100).status().batch_size, 20);
