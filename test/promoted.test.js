@@ -59,7 +59,7 @@ test("market rejects mismatched pair identity before claiming any work", async (
   assert.equal(calls.some(x => x.name.includes("claim")), false);
 });
 
-test("market default batch processes ten promoted targets sequentially", async () => {
+test("market default batch processes twenty promoted targets sequentially", async () => {
   const calls = [];
   let nextRun = 1;
   const worker = createPromotedCollector({ kind: "market", enabled: true, log: () => {},
@@ -76,13 +76,13 @@ test("market default batch processes ten promoted targets sequentially", async (
 
   const result = await worker.run();
   assert.equal(result.status, "success");
-  assert.equal(result.batch_size, 10);
-  assert.equal(result.targets_processed, 10);
-  assert.equal(result.successful_targets, 10);
+  assert.equal(result.batch_size, 20);
+  assert.equal(result.targets_processed, 20);
+  assert.equal(result.successful_targets, 20);
   assert.equal(result.failed_targets, 0);
-  assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
-  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
-  assert.equal(worker.status().batch_size, 10);
+  assert.equal(calls.filter(x => x.name.includes("claim")).length, 20);
+  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 20);
+  assert.equal(worker.status().batch_size, 20);
 });
 
 test("market batch continues after one claimed target fails identity validation", async () => {
@@ -110,11 +110,11 @@ test("market batch continues after one claimed target fails identity validation"
 
   const result = await worker.run();
   assert.equal(result.status, "success");
-  assert.equal(result.targets_processed, 10);
-  assert.equal(result.successful_targets, 9);
+  assert.equal(result.targets_processed, 20);
+  assert.equal(result.successful_targets, 19);
   assert.equal(result.failed_targets, 1);
-  assert.equal(calls.filter(x => x.name.includes("claim")).length, 10);
-  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 10);
+  assert.equal(calls.filter(x => x.name.includes("claim")).length, 20);
+  assert.equal(calls.filter(x => x.name.includes("ingest")).length, 20);
   const failedDelivery = calls.find(x => x.body?.p_error);
   assert.equal(failedDelivery.body.p_error, "Promoted DexScreener pair identity mismatch");
 });
