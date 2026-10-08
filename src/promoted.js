@@ -1,6 +1,6 @@
 // Keep target selection and all normalization/scoring in the existing database.
 export function createPromotedCollector({ kind, rpc, fetchJson, enabled, intervalMs = 300_000,
-  batchSize = kind === "market" ? 20 : 1, log = console.log }) {
+  batchSize = kind === "market" ? 10 : 1, log = console.log }) {
   if (!["market", "signatures"].includes(kind)) throw new Error("Invalid promoted collector kind");
   let running = false, lastRun = null, probePassed = false;
   const name = `promoted_${kind}`;
