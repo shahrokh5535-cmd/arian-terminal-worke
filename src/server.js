@@ -258,7 +258,10 @@ const solanaDetails = createSolanaDetails({ rpc, fetchJson, fetchSignatures: fet
 
 const promotedMarket = createPromotedCollector({ kind: "market", rpc, fetchJson,
   enabled: String(process.env.ENABLE_PROMOTED_MARKET_INGEST || "true").toLowerCase() === "true",
-  intervalMs: scheduleInterval(process.env.PROMOTED_MARKET_INTERVAL_MS, 300_000, 300_000) });
+  intervalMs: scheduleInterval(process.env.PROMOTED_MARKET_INTERVAL_MS, 300_000, 300_000),
+  // Optional rollout/rollback control: set 10 for canary, 20 after verification.
+  batchSize: process.env.PROMOTED_MARKET_BATCH_SIZE === undefined
+    ? undefined : Number(process.env.PROMOTED_MARKET_BATCH_SIZE) });
 const promotedSignatures = createPromotedCollector({ kind: "signatures", rpc, fetchJson,
   enabled: String(process.env.ENABLE_PROMOTED_SIGNATURES_INGEST || "true").toLowerCase() === "true",
   intervalMs: scheduleInterval(process.env.PROMOTED_SIGNATURES_INTERVAL_MS, 300_000, 300_000) });
