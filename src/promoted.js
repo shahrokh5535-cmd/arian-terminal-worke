@@ -1,13 +1,13 @@
 // Keep target selection and all normalization/scoring in the existing database.
 export function createPromotedCollector({ kind, rpc, fetchJson, enabled, intervalMs = 300_000,
-  batchSize = kind === "market" ? 10 : 1, log = console.log }) {
+  batchSize = kind === "market" ? 20 : 1, log = console.log }) {
   if (!["market", "signatures"].includes(kind)) throw new Error("Invalid promoted collector kind");
   let running = false, lastRun = null, probePassed = false;
   const name = `promoted_${kind}`;
   const claimRpc = `arian_external_claim_${name}_v1`;
   const ingestRpc = `arian_external_ingest_${name}_v1`;
   const peekRpc = `arian_external_peek_${name}_v1`;
-  const maxBatchSize = Math.max(1, Math.min(Number(batchSize) || 1, 10));
+  const maxBatchSize = Math.max(1, Math.min(Number(batchSize) || 1, kind === "market" ? 20 : 10));
 
   function providerErrorForDatabase(error) {
     const message = error instanceof Error ? error.message : "unknown_error";
