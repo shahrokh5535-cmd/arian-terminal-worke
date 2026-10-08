@@ -118,3 +118,16 @@ test("market batch continues after one claimed target fails identity validation"
   const failedDelivery = calls.find(x => x.body?.p_error);
   assert.equal(failedDelivery.body.p_error, "Promoted DexScreener pair identity mismatch");
 });
+
+test("promoted market supports a bounded canary and rollback batch size", () => {
+  const make = (kind, batchSize) => createPromotedCollector({
+    kind, batchSize, enabled: true, rpc: async () => ({ status: "idle" }),
+    fetchJson: async () => { throw new Error("unexpected network call"); },
+    log: () => {}
+  });
+  assert.equal(make("market", 10).status().batch_size, 10);
+  assert.equal(make("market", 15).status().batch_size, 15);
+  assert.equal(make("market", 100).status().batch_size, 20);
+  assert.equal(make("market", 0).status().batch_size, 1);
+  assert.equal(make("signatures", undefined).status().batch_size, 1);
+});
