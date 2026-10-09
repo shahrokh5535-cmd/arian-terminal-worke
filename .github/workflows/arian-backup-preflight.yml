@@ -1,0 +1,37 @@
+name: ARIAN backup branch safety checks
+
+on:
+  push:
+    branches:
+      - arian-backup-only
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arian-backup-safety-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  safety:
+    name: Offline validations (NO secrets or Supabase access)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch checked-in, untrusted source without persisted token
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install test runner
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify backup SQL and encryption export controls
+        run: |
+          node --test test/r2-archive-preflight.test.js test/archive-export.test.js
+          bash -n scripts/export-snapshot-archive.sh
+      - name: Fail-closed secret and environment policy
+        run: |
+          echo "This workflow DOES NOT reference environment arian-backup-secure."
+          echo "No database secrets available, no pg_dump invocation, no Cloudflare/Drive access, no Supabase mutation."
