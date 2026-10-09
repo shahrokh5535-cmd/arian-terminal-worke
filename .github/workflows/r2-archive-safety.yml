@@ -6,6 +6,8 @@ on:
       - 'db/r2_archive_preflight.sql'
       - 'docs/R2_ARCHIVE_RUNBOOK.md'
       - 'test/r2-archive-preflight.test.js'
+      - 'test/archive-export.test.js'
+      - 'scripts/export-snapshot-archive.sh'
       - '.github/workflows/r2-archive-safety.yml'
   workflow_dispatch:
 
@@ -24,4 +26,6 @@ jobs:
         with:
           node-version: '20'
       - name: Assert archive diagnostic SQL and safety gates
-        run: node --test test/r2-archive-preflight.test.js
+        run: node --test test/r2-archive-preflight.test.js test/archive-export.test.js
+      - name: Check export shell syntax
+        run: bash -n scripts/export-snapshot-archive.sh
