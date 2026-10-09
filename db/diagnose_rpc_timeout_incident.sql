@@ -122,3 +122,29 @@ LIMIT 12;
 --   SQL reads return reliably; 2 consecutive promoted_market scheduled
 --   successes with new valid snapshots; no worsening 57014/PGRST003 errors.
 --   Do not change pg_cron schedules, force-kill sessions, or relax gates here.
+
+-- 9. Free-plan database quota check (read-only, no server files read).
+-- Organization plan confirmed Free on 2026-10-09; official quota is 500 MB
+-- per project. Live database size 1056 MB at 05:01 UTC (over 2x quota).
+-- A size over quota requires remediation, but is NOT proof of read-only mode
+-- or the sole cause of statement/connection timeouts.
+SELECT current_database() AS database_name,
+       pg_database_size(current_database()) AS database_bytes,
+       500::bigint * 1024 * 1024 AS free_quota_bytes,
+       pg_database_size(current_database()) > 500::bigint * 1024 * 1024 AS over_free_quota,
+       current_setting('default_transaction_read_only') AS read_only_default,
+       current_setting('transaction_read_only') AS read_only_this_session;
+
+-- 10. Database storage contributors (size statistics only; no row reads).
+SELECT schemaname, relname, pg_total_relation_size(relid) AS total_bytes
+FROM pg_stat_user_tables
+ORDER BY pg_total_relation_size(relid) DESC
+LIMIT 15;
+
+-- Retention/archival authorization required:
+-- Do NOT DELETE historical records, TRUNCATE, VACUUM FULL, upgrade billing,
+-- or touch Cloudflare/R2 based only on this report.
+-- First prepare a separately stored and VERIFIED archive with row counts,
+-- hashes/manifests and a tested restore path; secure explicit approval before
+-- removing any historical records from the live project.
+-- Backoff/chron changes also require migration, preconditions and rollback.
