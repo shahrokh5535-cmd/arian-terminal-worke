@@ -7,7 +7,7 @@ export function createPromotedCollector({ kind, rpc, fetchJson, enabled, interva
   const claimRpc = `arian_external_claim_${name}_v1`;
   const ingestRpc = `arian_external_ingest_${name}_v1`;
   const peekRpc = `arian_external_peek_${name}_v1`;
-  const maxBatchSize = Math.max(1, Math.min(Number(batchSize) || 1, 10));
+  const maxBatchSize = Math.max(1, Math.min(Number(batchSize) || 1, kind === "market" ? 20 : 10));
 
   function providerErrorForDatabase(error) {
     const message = error instanceof Error ? error.message : "unknown_error";
