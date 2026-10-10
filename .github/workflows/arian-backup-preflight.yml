@@ -29,8 +29,9 @@ jobs:
           node-version: '20'
       - name: Verify backup SQL and encryption export controls
         run: |
-          node --test test/r2-archive-preflight.test.js test/archive-export.test.js
+          node --test test/r2-archive-preflight.test.js test/archive-export.test.js test/full-backup-export.test.js
           bash -n scripts/export-snapshot-archive.sh
+          bash -n scripts/export-full-database-encrypted.sh
       - name: Fail-closed secret and environment policy
         run: |
           echo "This workflow DOES NOT reference environment arian-backup-secure."
