@@ -1,0 +1,59 @@
+-- ARIAN TERMINAL — Stabilization Stage A
+-- Candidate performance-only index for Promoted Pool Signature Claim.
+-- PREPARED, NOT APPLIED. 2026-10-11. Project: ctikvqtvzoaqqgnxqbgu
+-- Does not alter Worker, cron jobs, table rows, Fusion weights, RLS, or existing functions.
+--
+-- EVIDENCE:
+-- public.arian_external_claim_promoted_signatures_v1() repeatedly executes:
+--   SELECT max(re.received_at)
+--   FROM public.raw_events re
+--   WHERE re.event_type = 'solana_promoted_pool_signature_batch'
+--     AND re.metadata_json->>'pool_id' = lp.id::text;
+-- This query has no pool_id-targeted expression index in the inspected catalog.
+-- 215 PostgREST statement-timeout log events were attributed to the claim
+-- RPC during the 24-hour diagnostic window. This does not prove causation.
+--
+-- IMPORTANT: A guarded transactional index creation was attempted on
+-- 2026-10-11, failed with statement timeout, and was verified rolled back
+-- (index absent and no new migration recorded). DO NOT blindly retry it.
+--
+-- PRECHECK (read-only, may run in SQL editor):
+-- SELECT c.relname, i.indisvalid, i.indisready
+-- FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid
+-- WHERE c.relname='idx_arian_raw_events_promoted_pool_recent';
+-- SELECT jobid, active FROM cron.job WHERE jobid IN (15,28,26)
+-- ORDER BY jobid;
+--
+-- APPLY ONLY WHEN authorized direct/session SQL connection is confirmed healthy,
+-- database workload is stable, and an operational rollback window exists.
+-- CREATE INDEX CONCURRENTLY must execute as ONE STANDALONE STATEMENT, NOT
+-- in BEGIN/COMMIT, apply_migration transaction, or a multi-command batch.
+-- It can wait on old transactions and may leave an invalid index if interrupted.
+-- Do not run this automatically from CI.
+--
+-- APPLY (manual, separate statement):
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS
+--   idx_arian_raw_events_promoted_pool_recent
+-- ON public.raw_events ((metadata_json ->> 'pool_id'), received_at DESC)
+-- WHERE event_type = 'solana_promoted_pool_signature_batch';
+--
+-- POSTCHECK (read-only, separate):
+-- SELECT c.relname, i.indisvalid, i.indisready,
+--        pg_size_pretty(pg_relation_size(c.oid)) AS size
+-- FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid
+-- WHERE c.relname='idx_arian_raw_events_promoted_pool_recent';
+-- EXPLAIN SELECT max(re.received_at)
+-- FROM public.raw_events re
+-- WHERE re.event_type='solana_promoted_pool_signature_batch'
+--   AND re.metadata_json->>'pool_id'='1';
+-- Inspect planner use with a REAL active pool_id if needed.
+-- Record pre/post timeout events, successful scheduled deliveries,
+-- and market_snapshots freshness in several independent cycles.
+-- Index presence alone is NOT a successful stabilization.
+--
+-- ROLLBACK (only if warranted, standalone and outside transaction):
+-- DROP INDEX CONCURRENTLY IF EXISTS
+--   public.idx_arian_raw_events_promoted_pool_recent;
+--
+-- Stopping criterion: if connect/startup timeout persists, do not pile on
+-- schema changes. Diagnose CPU/IO and connection pool at provider level.
