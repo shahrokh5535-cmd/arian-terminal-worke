@@ -35,7 +35,7 @@ export function auditTokenFlowV2(input, { owner, mint, tokenAccount, poolOwners 
   // Any pre-existing token balance at the same account index blocks inference.
   const created = instructions.some(x => {
     const p = x?.parsed;
-    return (['create','createIdempotent'].includes(p?.type) &&
+    return (['create'].includes(p?.type) &&
         (p.info?.account === tokenAccount || p.info?.associatedAccount === tokenAccount)) ||
       (['initializeAccount','initializeAccount2','initializeAccount3'].includes(p?.type) &&
         p.info?.account === tokenAccount);
