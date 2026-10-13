@@ -1,6 +1,7 @@
 /**
  * Stage D: bounded read-only Solana signature history scan.
  * Known signatures are deduplication hints, NOT proof older history is complete.
+ * RPC pagination exhaustion is NOT independent proof of complete chain history.
  * Never writes, claims a lease, or authorizes a production trade/position/PnL.
  */
 export async function discoverMissingPoolSignatures({
@@ -50,6 +51,7 @@ export async function discoverMissingPoolSignatures({
     before = cursor;
   }
   return { address, pagesRead, pageSize, maxPages, knownEncountered,
-    historyExhausted, coverageComplete: historyExhausted, reason, candidates,
+    historyExhausted, rpcPaginationExhausted: historyExhausted,
+    coverageComplete: false, historicalBoundaryVerified: false, reason, candidates,
     productionReplayAuthorized: false, pnlVerified: false };
 }
