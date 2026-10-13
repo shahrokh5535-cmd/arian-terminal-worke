@@ -24,12 +24,24 @@ export function auditTokenFlowV2(input, { owner, mint, tokenAccount, poolOwners 
     if (hits.length !== 1 || hits[0].owner !== expectedOwner) return null;
     return raw(hits[0].uiTokenAmount?.amount);
   };
-  const before = find(tx.meta.preTokenBalances,index,owner);
+  const observedBefore = find(tx.meta.preTokenBalances,index,owner);
   const after = find(tx.meta.postTokenBalances,index,owner);
   const instructions = [
     ...(tx.transaction.message.instructions ?? []),
     ...(tx.meta.innerInstructions ?? []).flatMap(x => x.instructions ?? [])
   ];
+  // Never infer an opening zero balance from a missing preTokenBalances row
+  // unless the transaction explicitly creates/initializes this token account.
+  // Any pre-existing token balance at the same account index blocks inference.
+  const created = instructions.some(x => {
+    const p = x?.parsed;
+    return (['create','createIdempotent'].includes(p?.type) &&
+        (p.info?.account === tokenAccount || p.info?.associatedAccount === tokenAccount)) ||
+      (['initializeAccount','initializeAccount2','initializeAccount3'].includes(p?.type) &&
+        p.info?.account === tokenAccount);
+  });
+  const noPreAccount = !(tx.meta.preTokenBalances ?? []).some(b => b.accountIndex === index);
+  const before = observedBefore === null && created && noPreAccount ? 0n : observedBefore;
   const close = instructions.some(x =>
     x.parsed?.type === 'closeAccount' && x.parsed.info?.account === tokenAccount);
   if (before === 0n && after === null && close)
