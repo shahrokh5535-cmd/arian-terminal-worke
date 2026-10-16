@@ -22,8 +22,8 @@ test("reject URLs that could redirect or impersonate trusted post links", () => 
     "https://evil.test/solana/status/" + id,
     "https://x.com/solana/status/" + id + "/../../api",
     "https://x.com/solana/status/" + id + "9",
-    "https://x.com/solana/status/" + id + "#frag/../"
-  ]) { if (candidate.includes("#frag")) continue; assert.equal(validateXPostLink(candidate, id), false, candidate); }
+    "https://x.com/solana/status/" + id + "/extra"
+  ]) { assert.equal(validateXPostLink(candidate, id), false, candidate); }
 });
 test("accept supplied lookup identifier only on matching trusted permalink", () => {
   assert.equal(validateXPostLink(url, "2105630940537983115"), false);
