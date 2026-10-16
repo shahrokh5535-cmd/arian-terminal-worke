@@ -4,7 +4,7 @@ const X_EPOCH = 1288834974657n;
 const MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
 
 export function validateXPostId(id, { now = Date.now() } = {}) {
-  if (typeof id !== "string" || !/^[0-9]{1,20}$/.test(id)) return false;
+  if (typeof id !== "string" || !/^[1-9][0-9]{14,19}$/.test(id)) return false;
   let numeric;
   try { numeric = BigInt(id); } catch { return false; }
   if (numeric <= 0n || numeric > ((1n << 64n) - 1n)) return false;
