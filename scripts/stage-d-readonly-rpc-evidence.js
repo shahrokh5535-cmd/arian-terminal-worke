@@ -22,7 +22,7 @@ else {
   for (let i=0;i<ids.length;i++) {
     const signature=ids[i];
     let row={signature,status:"UNKNOWN",feeLamports:null,slot:null,blockTime:null,
-      solBalanceChanges:[],tokenBalanceChanges:[],pnlVerified:false,productionReplayAuthorized:false};
+      solBalanceChanges:[],tokenBalanceChanges:[],quoteProceedsVerified:false,pnlVerified:false,productionReplayAuthorized:false};
     try {
       const response=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},
         body:JSON.stringify({jsonrpc:"2.0",id:i+1,method:"getTransaction",
@@ -34,16 +34,20 @@ else {
       const tx=json.result;
       if (!tx) throw Error("historical_transaction_unavailable");
       if (tx.meta?.err != null || !tx.meta || !tx.transaction?.message) throw Error("transaction_failed_or_incomplete");
+      const signatures=tx.transaction.signatures;
+      if (!Array.isArray(signatures) || !signatures.includes(signature)) throw Error("rpc_signature_mismatch");
+      if (!Number.isSafeInteger(tx.slot) || !Number.isSafeInteger(tx.blockTime)) throw Error("invalid_slot_or_time");
       const keys=(tx.transaction.message.accountKeys||[]).map(x=>typeof x==="string"?x:x.pubkey);
+      if (keys.some(x=>typeof x!=="string" || !x)) throw Error("invalid_account_keys");
       if(!Array.isArray(tx.meta.preBalances)||!Array.isArray(tx.meta.postBalances)||
          tx.meta.preBalances.length!==tx.meta.postBalances.length||
          tx.meta.preBalances.length!==keys.length) throw Error("native_balances_incomplete");
       row.status="EVIDENCE_ONLY";row.slot=tx.slot;row.blockTime=tx.blockTime;
-      row.feeLamports=Number.isSafeInteger(tx.meta.fee)?tx.meta.fee:null;
+      row.feeLamports=Number.isSafeInteger(tx.meta.fee)&&tx.meta.fee>=0?tx.meta.fee:null;
       row.solBalanceChanges=keys.flatMap((account,index)=>{
         const before=tx.meta.preBalances[index],after=tx.meta.postBalances[index];
         if(!Number.isSafeInteger(before)||!Number.isSafeInteger(after)||before===after)return [];
-        return [{account,deltaLamports:after-before}];
+        return [{account,deltaLamports:after-before,meaning:"raw_balance_change_not_trade_proceeds"}];
       });
       const tokens=new Map();
       for(const [phase,arr] of [["before",tx.meta.preTokenBalances],["after",tx.meta.postTokenBalances]]){
