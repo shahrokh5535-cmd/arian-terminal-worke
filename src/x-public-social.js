@@ -1,4 +1,5 @@
 import { scheduleInterval } from "./schedule.js";
+import { validateXPostId, validateXPostLink } from "./x-post-link-guard.js";
 
 // Discovery-linked public posts only. All normalization and social scoring remain DB-local.
 export function createXPublicSocialCollector({ rpc, fetchJson, enabled, intervalMs = 600_000, batchSize = 5, log = console.log }) {
@@ -8,7 +9,7 @@ export function createXPublicSocialCollector({ rpc, fetchJson, enabled, interval
   const ingestRpc = "arian_external_ingest_x_public_social_v1";
 
   async function collect(tweetId) {
-    if (typeof tweetId !== "string" || !/^[0-9]{1,25}$/.test(tweetId)) throw new Error("Invalid X post ID");
+    if (!validateXPostId(tweetId)) throw new Error("Invalid X post ID");
     const { response, payload } = await fetchJson(`https://api.fxtwitter.com/status/${tweetId}`, {
       headers: { Accept: "application/json", "User-Agent": "ArianTerminal/1.0" }
     }, 10_000);
@@ -25,7 +26,9 @@ export function createXPublicSocialCollector({ rpc, fetchJson, enabled, interval
     const started = Date.now();
     const sample = await rpc("arian_external_peek_x_public_social_v1", {});
     if (sample?.status === "idle") return { status: "idle", mode: "shadow_probe", writes_to_supabase: false };
-    if (sample?.status !== "ready") throw new Error("Invalid X probe target");
+    if (sample?.status !== "ready" || !validateXPostId(sample.tweet_id) ||
+        (sample.tweet_url && !validateXPostLink(sample.tweet_url, sample.tweet_id)))
+      throw new Error("Invalid X probe target");
     const payload = await collect(sample.tweet_id);
     return { status: "success", mode: "shadow_probe", provider: "fxtwitter", upstream_platform: "x",
       writes_to_supabase: false, tweet_id: payload.tweet.id, author_handle: payload.tweet.author?.screen_name ?? null,
@@ -81,7 +84,9 @@ export function createXPublicSocialCollector({ rpc, fetchJson, enabled, interval
       for (let i = 0; i < maxBatchSize; i++) {
         claim = await rpc("arian_external_claim_x_public_social_v1", {});
         if (claim?.status === "idle") break;
-        if (claim?.status !== "claimed" || !Number.isSafeInteger(claim.run_id) || claim.run_id < 1) {
+        if (claim?.status !== "claimed" || !Number.isSafeInteger(claim.run_id) || claim.run_id < 1 ||
+            !validateXPostId(claim.tweet_id) ||
+            (claim.tweet_url && !validateXPostLink(claim.tweet_url, claim.tweet_id))) {
           throw new Error("Invalid external X claim response");
         }
         try { items.push(await ingestClaim(claim)); }
