@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createXPublicSocialCollector } from "../src/x-public-social.js";
 
+const GOOD_ID = "2105630940537983114";
+
 function setup({ apiError = false, mismatch = false, timeout = false, unknownDelivery = false, idle = false, block = null, batchSize = 1 } = {}) {
   const calls = []; let fetches = 0, deliveries = 0;
   const worker = createXPublicSocialCollector({ enabled: true, intervalMs: 1, batchSize, log: () => {},
     rpc: async (name, body) => {
       calls.push({ name, body });
-      if (name.includes("peek")) return { status: "ready", tweet_id: "123" };
-      if (name.includes("claim")) return idle ? { status: "idle" } : { status: "claimed", run_id: 42, tweet_id: "123" };
+      if (name.includes("peek")) return { status: "ready", tweet_id: GOOD_ID };
+      if (name.includes("claim")) return idle ? { status: "idle" } : { status: "claimed", run_id: 42, tweet_id: GOOD_ID };
       if (!body.p_error && (timeout || unknownDelivery) && ++deliveries <= (unknownDelivery ? 2 : 1)) throw new Error("timeout");
       return { status: unknownDelivery || !body.p_error ? "success" : "failed", run_id: 42, content_id: 11 };
     },
@@ -16,7 +18,7 @@ function setup({ apiError = false, mismatch = false, timeout = false, unknownDel
       fetches++;
       if (block) await block;
       if (apiError && fetches > 1) return { response: { ok: false, status: 404 } };
-      return { response: { ok: true }, payload: { code: 200, tweet: { id: mismatch ? "999" : "123", text: "Token news", author: { screen_name: "test" } } } };
+      return { response: { ok: true }, payload: { code: 200, tweet: { id: mismatch ? "2105630940537983115" : GOOD_ID, text: "Token news", author: { screen_name: "test" } } } };
     }
   });
   return { worker, calls };
@@ -76,9 +78,9 @@ test("default X social batch processes five posts sequentially", async () => {
   const worker = createXPublicSocialCollector({ enabled: true, intervalMs: 600_000, log: () => {},
     rpc: async (name, body) => {
       calls.push({ name, body });
-      if (name.includes("peek")) return { status: "ready", tweet_id: "123" };
+      if (name.includes("peek")) return { status: "ready", tweet_id: GOOD_ID };
       if (name.includes("claim")) {
-        const id = String(122 + nextRun);
+        const id = (BigInt(GOOD_ID) + BigInt(nextRun - 1)).toString();
         return { status: "claimed", run_id: nextRun++, tweet_id: id };
       }
       return { status: "success", run_id: body.p_run_id, content_id: body.p_run_id };
