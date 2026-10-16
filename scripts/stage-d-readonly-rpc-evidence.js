@@ -53,7 +53,7 @@ else {
           prev[phase]=t.uiTokenAmount?.amount??null;tokens.set(k,prev);
         }
       }
-      row.tokenBalanceChanges=[...tokens.values()].map(t=>({...t,deltaRaw:t.before!==null&&t.after!==null&&/^\\d+$/.test(t.before)&&/^\\d+$/.test(t.after)?(BigInt(t.after)-BigInt(t.before)).toString():null}));
+      row.tokenBalanceChanges=[...tokens.values()].map(t=>({...t,deltaRaw:t.before!==null&&t.after!==null&&/^[0-9]+$/.test(t.before)&&/^[0-9]+$/.test(t.after)?(BigInt(t.after)-BigInt(t.before)).toString():null}));
     } catch(e) {row.status="UNKNOWN";row.reason=String(e.message).slice(0,100);}
     results.push(row);
     if(i+1<ids.length) await sleep(900);
