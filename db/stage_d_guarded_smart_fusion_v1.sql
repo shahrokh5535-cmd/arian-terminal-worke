@@ -29,6 +29,7 @@ REVOKE ALL ON arian_private.arian_d_verified_trade_proofs_v1 FROM PUBLIC,anon,au
 CREATE VIEW arian_private.arian_d_guarded_trades_v1 WITH (security_barrier=true) AS
 SELECT wt.id AS wallet_trade_id,wt.wallet_address_id,wt.asset_instance_id,
   check_evidence.is_verified,
+  CASE WHEN check_evidence.is_verified THEN p.verified_at ELSE NULL END AS proof_verified_at,
   CASE WHEN check_evidence.is_verified THEN
     p.sale_proceeds_usd-p.cost_basis_usd-p.all_fees_usd ELSE NULL END AS verified_realized_pnl_usd,
   CASE WHEN check_evidence.is_verified THEN
@@ -70,16 +71,16 @@ SELECT wa.id AS wallet_address_id, count(gt.wallet_trade_id)::bigint AS total_tr
   count(gt.wallet_trade_id) FILTER (WHERE NOT gt.is_verified)::bigint AS unknown_trades,
   CASE WHEN count(gt.wallet_trade_id)>0
            AND count(gt.wallet_trade_id)=count(gt.wallet_trade_id) FILTER (WHERE gt.is_verified)
-           AND ws.calculated_at>=max(wt.created_at)
+           AND ws.calculated_at>=greatest(max(wt.created_at),max(gt.proof_verified_at))
        THEN ws.smart_score ELSE NULL END AS trusted_smart_score,
   CASE WHEN count(gt.wallet_trade_id)>0
            AND count(gt.wallet_trade_id)=count(gt.wallet_trade_id) FILTER (WHERE gt.is_verified)
-           AND ws.calculated_at>=max(wt.created_at)
+           AND ws.calculated_at>=greatest(max(wt.created_at),max(gt.proof_verified_at))
        THEN sum(gt.verified_realized_pnl_usd) ELSE NULL END AS trusted_realized_pnl_usd,
   ws.smart_score AS calculated_unverified_score,
   CASE WHEN count(gt.wallet_trade_id)>0
            AND count(gt.wallet_trade_id)=count(gt.wallet_trade_id) FILTER (WHERE gt.is_verified)
-           AND ws.calculated_at>=max(wt.created_at)
+           AND ws.calculated_at>=greatest(max(wt.created_at),max(gt.proof_verified_at))
        THEN 'VERIFIED' ELSE 'UNKNOWN' END AS performance_status
 FROM public.wallet_addresses wa
 JOIN public.chains c ON c.id=wa.chain_id AND c.chain_key='solana'
@@ -100,6 +101,7 @@ DECLARE
   asset_score_time timestamptz;
   asset_score numeric;
   eligible boolean;
+  preview_final numeric;
   blockers jsonb;
 BEGIN
   base:=public.arian_check_production_fusion_readiness(p_asset_instance_id);
@@ -119,6 +121,13 @@ BEGIN
         AND total_wallets=verified_wallets AND asset_score IS NOT NULL
         AND asset_score_time IS NOT NULL
         AND asset_score_time>=verified_wallet_score_latest;
+  IF eligible THEN
+    preview_final:=round(
+       ((base->'market'->>'score')::numeric*0.25
+       +(base->'risk'->>'score')::numeric*0.15
+       +(base->'social'->>'score')::numeric*0.25
+       +asset_score*0.35)::numeric,2);
+  END IF;
   blockers:=coalesce(base->'blockers','[]'::jsonb);
   IF total_wallets=0 OR verified_wallets<total_wallets THEN
     blockers:=blockers||'["smart_money_trade_proof_missing"]'::jsonb;
@@ -132,7 +141,7 @@ BEGIN
     'allowed',eligible,'blockers',blockers,
     'wallets_total',total_wallets,'wallets_verified',verified_wallets,
     'trusted_smart_money_score',CASE WHEN eligible THEN asset_score ELSE NULL END,
-    'trusted_fusion_score',NULL,'writes_to_production',false);
+    'trusted_fusion_score',preview_final,'writes_to_production',false);
 END;
 $func$;
 REVOKE ALL ON FUNCTION arian_private.arian_d_preview_guarded_fusion_v1(bigint)
