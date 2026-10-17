@@ -1,7 +1,7 @@
 // Stage D release gate: pure, read-only PnL presentation policy.
 // Never infer monetary profit from token deltas or historical reference candles.
 export function presentVerifiedTrade(trade = {}) {
-  const required = ["signature", "inputAmountRaw", "outputAmountRaw", "inputUsd", "outputUsd", "feeUsd"];
+  
   const validText = x => typeof x === "string" && x.trim().length > 0;
   const validRaw = x => typeof x === "string" && /^[0-9]+$/.test(x) && BigInt(x) > 0n;
   const validUsd = x => typeof x === "number" && Number.isFinite(x) && x >= 0;
@@ -9,17 +9,17 @@ export function presentVerifiedTrade(trade = {}) {
   const verified =
     validText(trade.signature) &&
     validRaw(trade.inputAmountRaw) && validRaw(trade.outputAmountRaw) &&
-    validUsd(trade.inputUsd) && validUsd(trade.outputUsd) && validUsd(trade.feeUsd) &&
+    validUsd(trade.costBasisUsd) && validUsd(trade.saleProceedsUsd) && validUsd(trade.feeUsd) &&
     evidence.finalized === true && evidence.signatureMatches === true &&
     evidence.inputOutputVerified === true && evidence.executionQuoteVerified === true &&
-    evidence.feeVerified === true && evidence.historyComplete === true &&
+    evidence.feeVerified === true && evidence.historyComplete === true && evidence.matchedEntryAndExit === true &&
     evidence.source === "solana_transaction";
   if (!verified) return {
     signature: validText(trade.signature) ? trade.signature : null,
     pnlStatus: "UNKNOWN", realizedPnlUsd: null, win: null,
     eligibleForSmartMoneyWinRate: false, source: "unverified_or_incomplete"
   };
-  const pnl = trade.outputUsd - trade.inputUsd - trade.feeUsd;
+  const pnl = trade.saleProceedsUsd - trade.costBasisUsd - trade.feeUsd;
   if (!Number.isFinite(pnl)) return {
     signature: trade.signature, pnlStatus: "UNKNOWN", realizedPnlUsd: null, win: null,
     eligibleForSmartMoneyWinRate: false, source: "unsafe_numeric_result"
