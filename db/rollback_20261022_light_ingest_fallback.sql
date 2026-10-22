@@ -7,7 +7,7 @@ SET LOCAL statement_timeout='10s';
 DO $guard$
 BEGIN
   IF (SELECT count(*) FROM cron.job WHERE jobid IN(1,2,3,4,20) AND active)<>5 THEN
-    RAISE EXCEPTION 'Expected exactly 3 active fallback jobs; review cron.job before rollback';
+    RAISE EXCEPTION 'Expected exactly 5 active fallback jobs; review cron.job before rollback';
   END IF;
   IF (SELECT count(*) FROM cron.job WHERE
     (jobid=1 AND schedule='*/15 * * * *'
